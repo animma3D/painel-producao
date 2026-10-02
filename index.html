@@ -308,6 +308,14 @@ td.num, th.num{ text-align:right; font-variant-numeric:tabular-nums; }
 .gantt-bar.warn{ background:#b8860b; }
 .gantt-bar.ok{ background:#2f7a3c; }
 .gantt-bar.overdue{ outline:2px solid var(--danger); outline-offset:1px; }
+.gantt-milestone{
+  position:absolute; top:50%; width:15px; height:15px; margin-left:-8px;
+  transform:translateY(-50%) rotate(45deg); cursor:pointer; border:1px solid rgba(0,0,0,.2);
+}
+.gantt-milestone.gray{ background:#8a8a8a; }
+.gantt-milestone.warn{ background:#b8860b; }
+.gantt-milestone.ok{ background:#2f7a3c; }
+.gantt-milestone.overdue{ outline:2px solid var(--danger); outline-offset:2px; }
 .gantt-today-line{ position:absolute; top:0; bottom:0; width:2px; background:var(--danger); z-index:5; }
 .gantt-today-label{ position:absolute; top:-1.1rem; font-size:.62rem; color:var(--danger); font-weight:700; white-space:nowrap; }
 
@@ -512,9 +520,9 @@ function diffDays(a,b){ return Math.round((b-a)/86400000); }
 function addDays(d,n){ const r = new Date(d); r.setDate(r.getDate()+n); return r; }
 function isoOf(d){ return d.toISOString().slice(0,10); }
 function isOverdue(item){
-  if(!item.dataFim || item.status==='Concluído') return false;
+  if(!item.prazo || item.status==='Concluído') return false;
   const today = new Date(); today.setHours(0,0,0,0);
-  return parseISO(item.dataFim) < today;
+  return parseISO(item.prazo) < today;
 }
 function addMinutes(hhmm, minutes){
   const m = String(hhmm||'').match(/^(\d{1,2}):(\d{2})$/);
@@ -612,8 +620,7 @@ function SCHEMAS(){
     deliverable: {
       title:'entrega', gender:'f', fields:[
         {key:'titulo', label:'Entrega / marco', type:'text', required:true},
-        {key:'dataInicio', label:'Início', type:'date', half:true},
-        {key:'dataFim', label:'Prazo final', type:'date', required:true, half:true},
+        {key:'prazo', label:'Prazo', type:'date', required:true, half:true},
         {key:'responsavel', label:'Responsável', type:'text', half:true},
         {key:'status', label:'Status', type:'select', options:DELIV_STATUS.map(s=>({value:s,label:s})), half:true},
         {key:'notas', label:'Notas', type:'textarea'},
@@ -807,6 +814,7 @@ function setTop(title, sub, actionsHtml){
 }
 
 const EVENT_TABS = [
+  { key:'resumo', label:'Dashboard' },
   { key:'orcamento', label:'Orçamento' },
   { key:'entregas', label:'Entregas' },
   { key:'tm', label:'T&M' },
@@ -991,15 +999,14 @@ function buildMonthGrid(year, month){
 
 function renderDeliverablesLista(items){
   if(!items.length) return `<div class="empty"><div class="ic">▦</div>Nenhuma entrega cadastrada ainda.</div>`;
-  const sorted = [...items].sort((a,b)=>(a.dataFim||a.dataInicio||'9999').localeCompare(b.dataFim||b.dataInicio||'9999'));
+  const sorted = [...items].sort((a,b)=>(a.prazo||'9999').localeCompare(b.prazo||'9999'));
   return `<div class="table-wrap"><table>
-    <thead><tr><th>Entrega</th><th>Início</th><th>Prazo</th><th>Responsável</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Entrega</th><th>Prazo</th><th>Responsável</th><th>Status</th><th></th></tr></thead>
     <tbody>${sorted.map(it=>{
       const overdue = isOverdue(it);
       return `<tr>
         <td>${escapeHtml(it.titulo)}${overdue?'<span class="overdue-flag">ATRASADA</span>':''}</td>
-        <td class="small muted">${it.dataInicio?fmtDate(it.dataInicio):'—'}</td>
-        <td class="small"><strong>${it.dataFim?fmtDate(it.dataFim):'—'}</strong></td>
+        <td class="small"><strong>${it.prazo?fmtDate(it.prazo):'—'}</strong></td>
         <td class="small muted">${escapeHtml(it.responsavel||'—')}</td>
         <td>${badgeForDeliverableStatus(it.status)}</td>
         <td>
@@ -1024,9 +1031,8 @@ function renderDeliverablesAgenda(items){
 
   const byDate = {};
   items.forEach(it=>{
-    const due = it.dataFim || it.dataInicio;
-    if(!due) return;
-    (byDate[due] = byDate[due]||[]).push(it);
+    if(!it.prazo) return;
+    (byDate[it.prazo] = byDate[it.prazo]||[]).push(it);
   });
 
   return `
@@ -1058,14 +1064,13 @@ function renderDeliverablesAgenda(items){
 }
 
 function renderDeliverablesGantt(items){
-  const withDates = items.filter(it=>it.dataInicio || it.dataFim);
+  const withDates = items.filter(it=>it.prazo);
   if(!withDates.length){
-    return `<div class="empty"><div class="ic">▦</div>Defina data de início ou prazo nas entregas para ver o Gantt.</div>`;
+    return `<div class="empty"><div class="ic">▦</div>Defina um prazo nas entregas para ver o Gantt.</div>`;
   }
-  const starts = withDates.map(it=>parseISO(it.dataInicio||it.dataFim));
-  const ends = withDates.map(it=>parseISO(it.dataFim||it.dataInicio));
-  let minDate = addDays(new Date(Math.min(...starts)), -1);
-  let maxDate = addDays(new Date(Math.max(...ends)), 2);
+  const dates = withDates.map(it=>parseISO(it.prazo));
+  let minDate = addDays(new Date(Math.min(...dates)), -2);
+  let maxDate = addDays(new Date(Math.max(...dates)), 2);
   const totalDays = diffDays(minDate, maxDate)+1;
   const pxPerDay = totalDays>60 ? 18 : (totalDays>30 ? 24 : 34);
   const totalWidth = totalDays*pxPerDay;
@@ -1089,13 +1094,11 @@ function renderDeliverablesGantt(items){
   }
 
   const rows = withDates.map(it=>{
-    const s = parseISO(it.dataInicio||it.dataFim);
-    const e = parseISO(it.dataFim||it.dataInicio);
-    const left = diffDays(minDate,s)*pxPerDay;
-    const width = Math.max((diffDays(s,e)+1)*pxPerDay - 4, 10);
+    const d = parseISO(it.prazo);
+    const left = diffDays(minDate,d)*pxPerDay;
     const overdue = isOverdue(it);
     const cls = it.status==='Concluído'?'ok':(it.status==='Em andamento'?'warn':'gray');
-    return { it, left, width, overdue, cls };
+    return { it, left, overdue, cls };
   });
 
   const todayMarker = (todayOffset>=0 && todayOffset<totalDays);
@@ -1104,7 +1107,7 @@ function renderDeliverablesGantt(items){
     <div class="gantt">
       <div class="gantt-labels">
         <div class="gantt-label-head"></div>
-        ${rows.map(r=>`<div class="gantt-label-row"><div class="gl-t">${escapeHtml(r.it.titulo)}</div><div class="gl-s">${escapeHtml(r.it.responsavel||'—')}</div></div>`).join('')}
+        ${rows.map(r=>`<div class="gantt-label-row"><div class="gl-t">${escapeHtml(r.it.titulo)}</div><div class="gl-s">${r.it.prazo?fmtDate(r.it.prazo):''}${r.it.responsavel?' · '+escapeHtml(r.it.responsavel):''}</div></div>`).join('')}
       </div>
       <div class="gantt-scroll">
         <div class="gantt-timeline" style="width:${totalWidth}px">
@@ -1115,7 +1118,7 @@ function renderDeliverablesGantt(items){
           <div class="gantt-rows">
             ${rows.map(r=>`
               <div class="gantt-row">
-                <div class="gantt-bar ${r.cls} ${r.overdue?'overdue':''}" style="left:${r.left}px; width:${r.width}px;" data-edit-deliv="${r.it.id}" title="${escapeHtml(r.it.titulo)}">${escapeHtml(r.it.titulo)}</div>
+                <div class="gantt-milestone ${r.cls} ${r.overdue?'overdue':''}" style="left:${r.left}px;" data-edit-deliv="${r.it.id}" title="${escapeHtml(r.it.titulo)}"></div>
               </div>
             `).join('')}
             ${todayMarker?`<div class="gantt-today-line" style="left:${todayOffset*pxPerDay}px;"></div>`:''}
@@ -1146,6 +1149,95 @@ function renderDeliverablesPanel(items){
 
 function eventTabContent(tab, ctx){
   const { ev, id, budgetItems, scheduleItems, tasks, incidents, deliverables, rundownLive, logisticaItems, totalPrevisto, totalReal, margem } = ctx;
+
+  if(tab==='resumo'){
+    const totalDeliv = deliverables.length;
+    const doneDeliv = deliverables.filter(d=>d.status==='Concluído').length;
+    const pctDeliv = totalDeliv ? Math.round(doneDeliv/totalDeliv*100) : null;
+
+    const todayIso = isoOf(new Date());
+    const todayTasks = tasks.filter(t=>t.prazo===todayIso && t.status!=='Concluída');
+
+    const upcomingDeliv = [...deliverables].filter(d=>d.status!=='Concluído')
+      .sort((a,b)=>(a.prazo||'9999').localeCompare(b.prazo||'9999')).slice(0,5);
+
+    const todayD = new Date(); todayD.setHours(0,0,0,0);
+    const alerts = [];
+    deliverables.forEach(d=>{ if(isOverdue(d)) alerts.push({ sev:'danger', label:'Atraso', text:`Entrega — ${escapeHtml(d.titulo)}`, tab:'entregas' }); });
+    tasks.forEach(t=>{ if(t.status!=='Concluída' && t.prazo && parseISO(t.prazo)<todayD) alerts.push({ sev:'danger', label:'Atraso', text:`Tarefa — ${escapeHtml(t.titulo)}`, tab:'tarefas' }); });
+    budgetItems.forEach(b=>{ if((b.statusPagamento||'Pendente')==='Pendente') alerts.push({ sev:'warn', label:'Pendente', text:`Pagamento — ${escapeHtml(b.item)}`, tab:'orcamento' }); });
+    incidents.forEach(i=>{ if(['Alta','Crítica'].includes(i.gravidade)) alerts.push({ sev:'danger', label:i.gravidade, text:`Ocorrência — ${escapeHtml(i.titulo)}`, tab:'ocorrencias' }); });
+
+    return `
+    <div class="cards">
+      <div class="card">
+        <div class="kpi-label">Progresso das entregas</div>
+        <div class="kpi-num">${pctDeliv==null?'—':pctDeliv+'%'}</div>
+        <div class="kpi-sub">${totalDeliv? `${doneDeliv} de ${totalDeliv} concluídas` : 'nenhuma entrega cadastrada'}</div>
+      </div>
+      <div class="card">
+        <div class="kpi-label">Valor contratado</div>
+        <div class="kpi-num" style="font-size:1.5rem;">${fmtMoney(ev.valorContrato)}</div>
+      </div>
+      <div class="card">
+        <div class="kpi-label">Custo real</div>
+        <div class="kpi-num" style="font-size:1.5rem;">${fmtMoney(totalReal)}</div>
+        <div class="kpi-sub">previsto ${fmtMoney(totalPrevisto)}</div>
+      </div>
+      <div class="card">
+        <div class="kpi-label">Margem estimada</div>
+        <div class="kpi-num" style="font-size:1.5rem; color:${margem<0?'var(--danger)':'var(--ok)'}">${fmtMoney(margem)}</div>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="panel">
+        <div class="panel-head"><h3>Tarefas de hoje</h3><a class="btn ghost small" href="#/eventos/${id}/tarefas">Ver todas</a></div>
+        <div class="panel-body pad0">
+          ${todayTasks.length ? `<div class="table-wrap"><table><tbody>
+            ${todayTasks.map(t=>`<tr><td>${escapeHtml(t.titulo)}</td><td>${badgeForTaskStatus(t.status)}</td></tr>`).join('')}
+          </tbody></table></div>` : `<div class="empty"><div class="ic">✓</div>Nenhuma tarefa prevista para hoje.</div>`}
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>Próximas entregas</h3><a class="btn ghost small" href="#/eventos/${id}/entregas">Ver todas</a></div>
+        <div class="panel-body pad0">
+          ${upcomingDeliv.length ? `<div class="table-wrap"><table><tbody>
+            ${upcomingDeliv.map(d=>`<tr><td>${escapeHtml(d.titulo)}${isOverdue(d)?'<span class="overdue-flag">ATRASADA</span>':''}</td><td class="small muted">${d.prazo?fmtDate(d.prazo):'—'}</td><td>${badgeForDeliverableStatus(d.status)}</td></tr>`).join('')}
+          </tbody></table></div>` : `<div class="empty"><div class="ic">▦</div>Nenhuma entrega pendente.</div>`}
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>Atenção necessária</h3></div>
+      <div class="panel-body pad0">
+        ${alerts.length ? `<div class="table-wrap"><table><tbody>
+          ${alerts.map(a=>`<tr><td style="width:6.5rem;"><span class="badge ${a.sev}">${escapeHtml(a.label)}</span></td><td><a class="row-link" href="#/eventos/${id}/${a.tab}">${a.text}</a></td></tr>`).join('')}
+        </tbody></table></div>` : `<div class="empty"><div class="ic">✓</div>Tudo em dia por aqui.</div>`}
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>Outras frentes</h3></div>
+      <div class="panel-body">
+        <div class="cards" style="margin-bottom:0;">
+          <a class="card" href="#/eventos/${id}/tm" style="text-decoration:none; color:inherit;">
+            <div class="kpi-label">T&amp;M</div><div class="kpi-num">${scheduleItems.length}</div><div class="kpi-sub">itens no cronograma</div>
+          </a>
+          <a class="card" href="#/eventos/${id}/rundown" style="text-decoration:none; color:inherit;">
+            <div class="kpi-label">Rundown</div><div class="kpi-num">${rundownLive.length}</div><div class="kpi-sub">itens na chamada</div>
+          </a>
+          <a class="card" href="#/eventos/${id}/logistica" style="text-decoration:none; color:inherit;">
+            <div class="kpi-label">Logística</div><div class="kpi-num">${logisticaItems.length}</div><div class="kpi-sub">itens cadastrados</div>
+          </a>
+          <a class="card" href="#/eventos/${id}/ocorrencias" style="text-decoration:none; color:inherit;">
+            <div class="kpi-label">Ocorrências</div><div class="kpi-num">${incidents.length}</div><div class="kpi-sub">registradas</div>
+          </a>
+        </div>
+      </div>
+    </div>`;
+  }
 
   if(tab==='entregas'){
     return renderDeliverablesPanel(deliverables);
@@ -1431,7 +1523,7 @@ function renderEventDetail(id, tabKey){
   const ev = byId(DB.events, id);
   if(!ev){ location.hash = '#/eventos'; return; }
   const validKeys = EVENT_TABS.map(t=>t.key);
-  const tab = validKeys.includes(tabKey) ? tabKey : 'orcamento';
+  const tab = validKeys.includes(tabKey) ? tabKey : 'resumo';
 
   setTop(ev.nome, 'Detalhe do evento', `
     <button class="btn secondary small" id="btnEditEvent">Editar evento</button>
