@@ -770,9 +770,9 @@ const ROUTES = [
   { key:'eventos', path:'#/eventos', label:'Eventos', icon:'▣', group:'Produção' },
   { key:'tarefas', path:'#/tarefas', label:'Tarefas', icon:'✓', group:'Produção' },
   { key:'fornecedores', path:'#/fornecedores', label:'Fornecedores', icon:'⬡', group:'Rede' },
+  { key:'ocorrencias', path:'#/ocorrencias', label:'Ocorrências', icon:'!', group:'Rede' },
   { key:'equipe', path:'#/equipe', label:'Equipe', icon:'◍', group:'Rede' },
   { key:'financeiro', path:'#/financeiro', label:'Financeiro', icon:'$', group:'Gestão' },
-  { key:'ocorrencias', path:'#/ocorrencias', label:'Ocorrências', icon:'!', group:'Gestão' },
 ];
 
 function renderSidebar(activeKey){
@@ -806,12 +806,22 @@ function setTop(title, sub, actionsHtml){
   document.getElementById('topActions').innerHTML = actionsHtml||'';
 }
 
+const EVENT_TABS = [
+  { key:'entregas', label:'Entregas' },
+  { key:'orcamento', label:'Orçamento' },
+  { key:'tm', label:'T&M' },
+  { key:'rundown', label:'Rundown' },
+  { key:'logistica', label:'Logística' },
+  { key:'tarefas', label:'Tarefas' },
+  { key:'ocorrencias', label:'Ocorrências' },
+];
+
 function router(){
   const hash = location.hash || '#/dashboard';
-  const eventDetailMatch = hash.match(/^#\/eventos\/([^\/]+)$/);
+  const eventDetailMatch = hash.match(/^#\/eventos\/([^\/]+)(?:\/([^\/]+))?$/);
   if(eventDetailMatch){
     renderSidebar('eventos');
-    renderEventDetail(eventDetailMatch[1]);
+    renderEventDetail(eventDetailMatch[1], eventDetailMatch[2]);
     return;
   }
   const key = (hash.replace('#/','').split('/')[0]) || 'dashboard';
@@ -1134,45 +1144,15 @@ function renderDeliverablesPanel(items){
   `;
 }
 
-function renderEventDetail(id){
-  const ev = byId(DB.events, id);
-  if(!ev){ location.hash = '#/eventos'; return; }
-  setTop(ev.nome, 'Detalhe do evento', `
-    <button class="btn secondary small" id="btnEditEvent">Editar evento</button>
-    <button class="btn danger small" id="btnDeleteEvent">Excluir</button>
-  `);
+function eventTabContent(tab, ctx){
+  const { ev, id, budgetItems, scheduleItems, tasks, incidents, deliverables, rundownLive, logisticaItems, totalPrevisto, totalReal, margem } = ctx;
 
-  const budgetItems = DB.budgetItems.filter(b=>b.eventoId===id);
-  const scheduleItems = [...DB.schedule.filter(s=>s.eventoId===id)].sort((a,b)=>(a.horario||'').localeCompare(b.horario||''));
-  const tasks = DB.tasks.filter(t=>t.eventoId===id);
-  const incidents = DB.incidents.filter(i=>i.eventoId===id);
-  const deliverables = DB.deliverables.filter(d=>d.eventoId===id);
-  const rundownLive = [...DB.rundown.filter(r=>r.eventoId===id)].sort((a,b)=>(a.horario||'').localeCompare(b.horario||''));
-  const logisticaItems = DB.logistica.filter(l=>l.eventoId===id);
+  if(tab==='entregas'){
+    return renderDeliverablesPanel(deliverables);
+  }
 
-  const totalPrevisto = budgetItems.reduce((s,b)=>s+(Number(b.valorPrevisto)||0),0);
-  const totalReal = budgetItems.reduce((s,b)=>s+(Number(b.valorReal)||0),0);
-  const margem = (Number(ev.valorContrato)||0) - totalReal;
-
-  const html = `
-    <div class="event-header">
-      <div>
-        <div class="eyebrow">${escapeHtml(ev.status||'')}</div>
-        <h2>${escapeHtml(ev.nome)}</h2>
-        <div class="event-meta">
-          <span>📍 ${escapeHtml(ev.local||'local a definir')}</span>
-          <span>📅 ${fmtDateRange(ev.dataInicio, ev.dataFim)}</span>
-          ${ev.cliente?`<span>👤 ${escapeHtml(ev.cliente)}</span>`:''}
-          ${ev.participantes?`<span><strong>${ev.participantes}</strong> participantes</span>`:''}
-        </div>
-      </div>
-      <div><span class="badge ${{'Prospecção':'gray','Orçamento':'info','Confirmado':'ok','Em produção':'warn','Concluído':'ok','Cancelado':'danger'}[ev.status]||'gray'}" style="font-size:.82rem;">${escapeHtml(ev.status||'—')}</span></div>
-    </div>
-
-    ${ev.notas? `<div class="panel"><div class="panel-body small">${escapeHtml(ev.notas)}</div></div>` : ''}
-
-    ${renderDeliverablesPanel(deliverables)}
-
+  if(tab==='orcamento'){
+    return `
     <div class="panel">
       <div class="panel-head"><h3>Orçamento</h3><button class="btn small" id="btnAddBudget">+ Item</button></div>
       <div class="panel-body pad0">
@@ -1200,8 +1180,11 @@ function renderEventDetail(id){
         </div>
         ` : `<div class="empty"><div class="ic">$</div>Nenhum item de orçamento ainda.</div>`}
       </div>
-    </div>
+    </div>`;
+  }
 
+  if(tab==='tm'){
+    return `
     <div class="panel">
       <div class="panel-head"><h3>T&amp;M <span class="small muted" style="font-weight:400;">· Tempos e Movimentos (cronograma do evento)</span></h3><button class="btn small" id="btnAddSchedule">+ Item</button></div>
       <div class="panel-body pad0">
@@ -1224,8 +1207,11 @@ function renderEventDetail(id){
           }).join('')}</tbody>
         </table></div>` : `<div class="empty"><div class="ic">▣</div>Nenhum item de T&amp;M ainda.</div>`}
       </div>
-    </div>
+    </div>`;
+  }
 
+  if(tab==='rundown'){
+    return `
     <div class="panel">
       <div class="panel-head"><h3>Rundown <span class="small muted" style="font-weight:400;">· direção técnica, dia do evento (na house)</span></h3><button class="btn small" id="btnAddRundown">+ Item</button></div>
       <div class="panel-body pad0">
@@ -1248,8 +1234,11 @@ function renderEventDetail(id){
           }).join('')}</tbody>
         </table></div>` : `<div class="empty"><div class="ic">▣</div>Nenhum item de rundown ainda.</div>`}
       </div>
-    </div>
+    </div>`;
+  }
 
+  if(tab==='logistica'){
+    return `
     <div class="panel">
       <div class="panel-head"><h3>Logística <span class="small muted" style="font-weight:400;">· materiais e transporte</span></h3><button class="btn small" id="btnAddLogistica">+ Item</button></div>
       <div class="panel-body pad0">
@@ -1269,8 +1258,11 @@ function renderEventDetail(id){
             </tr>`).join('')}</tbody>
         </table></div>` : `<div class="empty"><div class="ic">▤</div>Nenhum item de logística ainda.</div>`}
       </div>
-    </div>
+    </div>`;
+  }
 
+  if(tab==='tarefas'){
+    return `
     <div class="panel">
       <div class="panel-head"><h3>Tarefas</h3><button class="btn small" id="btnAddTaskEv">+ Tarefa</button></div>
       <div class="panel-body">
@@ -1298,8 +1290,11 @@ function renderEventDetail(id){
           }).join('')}
         </div>
       </div>
-    </div>
+    </div>`;
+  }
 
+  if(tab==='ocorrencias'){
+    return `
     <div class="panel">
       <div class="panel-head"><h3>Ocorrências</h3><button class="btn small" id="btnAddIncidentEv">+ Ocorrência</button></div>
       <div class="panel-body pad0">
@@ -1318,7 +1313,167 @@ function renderEventDetail(id){
             </tr>`).join('')}</tbody>
         </table></div>` : `<div class="empty"><div class="ic">!</div>Nenhuma ocorrência registrada para este evento.</div>`}
       </div>
+    </div>`;
+  }
+
+  return '';
+}
+
+function wireEventTab(tab, ctx){
+  const { id } = ctx;
+
+  if(tab==='orcamento'){
+    document.getElementById('btnAddBudget').onclick = ()=> openForm('budgetItem', {
+      onSave:(rec)=>{ rec.eventoId=id; DB.budgetItems.push(rec); save(); toast('Item adicionado.'); renderEventDetail(id, tab); }
+    });
+    document.querySelectorAll('[data-edit-budget]').forEach(b=>b.onclick=()=>{
+      const rec = byId(DB.budgetItems, b.dataset.editBudget);
+      openForm('budgetItem', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Item atualizado.'); renderEventDetail(id, tab); } });
+    });
+    document.querySelectorAll('[data-del-budget]').forEach(b=>b.onclick=()=>{
+      confirmDelete('Excluir este item de orçamento?', ()=>{ DB.budgetItems = DB.budgetItems.filter(x=>x.id!==b.dataset.delBudget); save(); toast('Item excluído.'); renderEventDetail(id, tab); });
+    });
+  }
+
+  if(tab==='tm'){
+    document.getElementById('btnAddSchedule').onclick = ()=> openForm('scheduleItem', {
+      onSave:(rec)=>{ rec.eventoId=id; DB.schedule.push(rec); save(); toast('Item adicionado.'); renderEventDetail(id, tab); }
+    });
+    document.querySelectorAll('[data-edit-schedule]').forEach(b=>b.onclick=()=>{
+      const rec = byId(DB.schedule, b.dataset.editSchedule);
+      openForm('scheduleItem', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Item atualizado.'); renderEventDetail(id, tab); } });
+    });
+    document.querySelectorAll('[data-del-schedule]').forEach(b=>b.onclick=()=>{
+      confirmDelete('Excluir este item de T&M?', ()=>{ DB.schedule = DB.schedule.filter(x=>x.id!==b.dataset.delSchedule); save(); toast('Item excluído.'); renderEventDetail(id, tab); });
+    });
+  }
+
+  if(tab==='entregas'){
+    document.getElementById('btnAddDeliv').onclick = ()=> openForm('deliverable', {
+      onSave:(rec)=>{ rec.eventoId=id; DB.deliverables.push(rec); save(); toast('Entrega adicionada.'); renderEventDetail(id, tab); }
+    });
+    document.querySelectorAll('[data-deliv-view]').forEach(b=>b.onclick=()=>{
+      deliverablesView = b.dataset.delivView; renderEventDetail(id, tab);
+    });
+    document.querySelectorAll('[data-edit-deliv]').forEach(b=>b.onclick=()=>{
+      const rec = byId(DB.deliverables, b.dataset.editDeliv);
+      openForm('deliverable', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Entrega atualizada.'); renderEventDetail(id, tab); } });
+    });
+    document.querySelectorAll('[data-del-deliv]').forEach(b=>b.onclick=()=>{
+      confirmDelete('Excluir esta entrega?', ()=>{ DB.deliverables = DB.deliverables.filter(x=>x.id!==b.dataset.delDeliv); save(); toast('Entrega excluída.'); renderEventDetail(id, tab); });
+    });
+    const calPrev = document.getElementById('calPrev');
+    if(calPrev) calPrev.onclick = ()=>{ agendaMonthCursor = new Date(agendaMonthCursor.getFullYear(), agendaMonthCursor.getMonth()-1, 1); renderEventDetail(id, tab); };
+    const calNext = document.getElementById('calNext');
+    if(calNext) calNext.onclick = ()=>{ agendaMonthCursor = new Date(agendaMonthCursor.getFullYear(), agendaMonthCursor.getMonth()+1, 1); renderEventDetail(id, tab); };
+    const calToday = document.getElementById('calToday');
+    if(calToday) calToday.onclick = ()=>{ agendaMonthCursor = new Date(); agendaMonthCursor.setDate(1); agendaMonthCursor.setHours(0,0,0,0); renderEventDetail(id, tab); };
+  }
+
+  if(tab==='rundown'){
+    document.getElementById('btnAddRundown').onclick = ()=> openForm('rundownItem', {
+      onSave:(rec)=>{ rec.eventoId=id; DB.rundown.push(rec); save(); toast('Item adicionado.'); renderEventDetail(id, tab); }
+    });
+    document.querySelectorAll('[data-edit-rundown]').forEach(b=>b.onclick=()=>{
+      const rec = byId(DB.rundown, b.dataset.editRundown);
+      openForm('rundownItem', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Item atualizado.'); renderEventDetail(id, tab); } });
+    });
+    document.querySelectorAll('[data-del-rundown]').forEach(b=>b.onclick=()=>{
+      confirmDelete('Excluir este item de rundown?', ()=>{ DB.rundown = DB.rundown.filter(x=>x.id!==b.dataset.delRundown); save(); toast('Item excluído.'); renderEventDetail(id, tab); });
+    });
+  }
+
+  if(tab==='tarefas'){
+    document.getElementById('btnAddTaskEv').onclick = ()=> openForm('task', {
+      data:{eventoId:id}, onSave:(rec)=>{ DB.tasks.push(rec); save(); toast('Tarefa adicionada.'); renderEventDetail(id, tab); }
+    });
+    document.querySelectorAll('[data-edit-task]').forEach(b=>b.onclick=()=>{
+      const rec = byId(DB.tasks, b.dataset.editTask);
+      openForm('task', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Tarefa atualizada.'); renderEventDetail(id, tab); } });
+    });
+    document.querySelectorAll('[data-del-task]').forEach(b=>b.onclick=()=>{
+      confirmDelete('Excluir esta tarefa?', ()=>{ DB.tasks = DB.tasks.filter(x=>x.id!==b.dataset.delTask); save(); toast('Tarefa excluída.'); renderEventDetail(id, tab); });
+    });
+    document.querySelectorAll('[data-move-ev]').forEach(b=>b.onclick=()=>{
+      const rec = byId(DB.tasks, b.dataset.moveEv);
+      rec.status = b.dataset.status; save(); renderEventDetail(id, tab);
+    });
+  }
+
+  if(tab==='logistica'){
+    document.getElementById('btnAddLogistica').onclick = ()=> openForm('logisticaItem', {
+      onSave:(rec)=>{ rec.eventoId=id; DB.logistica.push(rec); save(); toast('Item adicionado.'); renderEventDetail(id, tab); }
+    });
+    document.querySelectorAll('[data-edit-logistica]').forEach(b=>b.onclick=()=>{
+      const rec = byId(DB.logistica, b.dataset.editLogistica);
+      openForm('logisticaItem', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Item atualizado.'); renderEventDetail(id, tab); } });
+    });
+    document.querySelectorAll('[data-del-logistica]').forEach(b=>b.onclick=()=>{
+      confirmDelete('Excluir este item de logística?', ()=>{ DB.logistica = DB.logistica.filter(x=>x.id!==b.dataset.delLogistica); save(); toast('Item excluído.'); renderEventDetail(id, tab); });
+    });
+  }
+
+  if(tab==='ocorrencias'){
+    document.getElementById('btnAddIncidentEv').onclick = ()=> openForm('incident', {
+      data:{eventoId:id}, onSave:(rec)=>{ DB.incidents.push(rec); save(); toast('Ocorrência registrada.'); renderEventDetail(id, tab); }
+    });
+    document.querySelectorAll('[data-edit-incident]').forEach(b=>b.onclick=()=>{
+      const rec = byId(DB.incidents, b.dataset.editIncident);
+      openForm('incident', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Ocorrência atualizada.'); renderEventDetail(id, tab); } });
+    });
+    document.querySelectorAll('[data-del-incident]').forEach(b=>b.onclick=()=>{
+      confirmDelete('Excluir esta ocorrência?', ()=>{ DB.incidents = DB.incidents.filter(x=>x.id!==b.dataset.delIncident); save(); toast('Ocorrência excluída.'); renderEventDetail(id, tab); });
+    });
+  }
+}
+
+function renderEventDetail(id, tabKey){
+  const ev = byId(DB.events, id);
+  if(!ev){ location.hash = '#/eventos'; return; }
+  const validKeys = EVENT_TABS.map(t=>t.key);
+  const tab = validKeys.includes(tabKey) ? tabKey : 'entregas';
+
+  setTop(ev.nome, 'Detalhe do evento', `
+    <button class="btn secondary small" id="btnEditEvent">Editar evento</button>
+    <button class="btn danger small" id="btnDeleteEvent">Excluir</button>
+  `);
+
+  const budgetItems = DB.budgetItems.filter(b=>b.eventoId===id);
+  const scheduleItems = [...DB.schedule.filter(s=>s.eventoId===id)].sort((a,b)=>(a.horario||'').localeCompare(b.horario||''));
+  const tasks = DB.tasks.filter(t=>t.eventoId===id);
+  const incidents = DB.incidents.filter(i=>i.eventoId===id);
+  const deliverables = DB.deliverables.filter(d=>d.eventoId===id);
+  const rundownLive = [...DB.rundown.filter(r=>r.eventoId===id)].sort((a,b)=>(a.horario||'').localeCompare(b.horario||''));
+  const logisticaItems = DB.logistica.filter(l=>l.eventoId===id);
+
+  const totalPrevisto = budgetItems.reduce((s,b)=>s+(Number(b.valorPrevisto)||0),0);
+  const totalReal = budgetItems.reduce((s,b)=>s+(Number(b.valorReal)||0),0);
+  const margem = (Number(ev.valorContrato)||0) - totalReal;
+
+  const ctx = { ev, id, budgetItems, scheduleItems, tasks, incidents, deliverables, rundownLive, logisticaItems, totalPrevisto, totalReal, margem };
+
+  const html = `
+    <div class="event-header">
+      <div>
+        <div class="eyebrow">${escapeHtml(ev.status||'')}</div>
+        <h2>${escapeHtml(ev.nome)}</h2>
+        <div class="event-meta">
+          <span>📍 ${escapeHtml(ev.local||'local a definir')}</span>
+          <span>📅 ${fmtDateRange(ev.dataInicio, ev.dataFim)}</span>
+          ${ev.cliente?`<span>👤 ${escapeHtml(ev.cliente)}</span>`:''}
+          ${ev.participantes?`<span><strong>${ev.participantes}</strong> participantes</span>`:''}
+        </div>
+      </div>
+      <div><span class="badge ${{'Prospecção':'gray','Orçamento':'info','Confirmado':'ok','Em produção':'warn','Concluído':'ok','Cancelado':'danger'}[ev.status]||'gray'}" style="font-size:.82rem;">${escapeHtml(ev.status||'—')}</span></div>
     </div>
+
+    ${ev.notas? `<div class="panel"><div class="panel-body small">${escapeHtml(ev.notas)}</div></div>` : ''}
+
+    <div class="subtabs">
+      ${EVENT_TABS.map(t=>`<a class="subtab ${t.key===tab?'active':''}" href="#/eventos/${id}/${t.key}">${t.label}</a>`).join('')}
+    </div>
+
+    ${eventTabContent(tab, ctx)}
   `;
   document.getElementById('view').innerHTML = html;
 
@@ -1331,102 +1486,7 @@ function renderEventDetail(id){
     });
   };
 
-  // budget
-  document.getElementById('btnAddBudget').onclick = ()=> openForm('budgetItem', {
-    onSave:(rec)=>{ rec.eventoId=id; DB.budgetItems.push(rec); save(); toast('Item adicionado.'); renderEventDetail(id); }
-  });
-  document.querySelectorAll('[data-edit-budget]').forEach(b=>b.onclick=()=>{
-    const rec = byId(DB.budgetItems, b.dataset.editBudget);
-    openForm('budgetItem', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Item atualizado.'); renderEventDetail(id); } });
-  });
-  document.querySelectorAll('[data-del-budget]').forEach(b=>b.onclick=()=>{
-    confirmDelete('Excluir este item de orçamento?', ()=>{ DB.budgetItems = DB.budgetItems.filter(x=>x.id!==b.dataset.delBudget); save(); toast('Item excluído.'); renderEventDetail(id); });
-  });
-
-  // schedule
-  document.getElementById('btnAddSchedule').onclick = ()=> openForm('scheduleItem', {
-    onSave:(rec)=>{ rec.eventoId=id; DB.schedule.push(rec); save(); toast('Item adicionado.'); renderEventDetail(id); }
-  });
-  document.querySelectorAll('[data-edit-schedule]').forEach(b=>b.onclick=()=>{
-    const rec = byId(DB.schedule, b.dataset.editSchedule);
-    openForm('scheduleItem', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Item atualizado.'); renderEventDetail(id); } });
-  });
-  document.querySelectorAll('[data-del-schedule]').forEach(b=>b.onclick=()=>{
-    confirmDelete('Excluir este item de rundown?', ()=>{ DB.schedule = DB.schedule.filter(x=>x.id!==b.dataset.delSchedule); save(); toast('Item excluído.'); renderEventDetail(id); });
-  });
-
-  // deliverables (cronograma de entregas)
-  document.getElementById('btnAddDeliv').onclick = ()=> openForm('deliverable', {
-    onSave:(rec)=>{ rec.eventoId=id; DB.deliverables.push(rec); save(); toast('Entrega adicionada.'); renderEventDetail(id); }
-  });
-  document.querySelectorAll('[data-deliv-view]').forEach(b=>b.onclick=()=>{
-    deliverablesView = b.dataset.delivView; renderEventDetail(id);
-  });
-  document.querySelectorAll('[data-edit-deliv]').forEach(b=>b.onclick=()=>{
-    const rec = byId(DB.deliverables, b.dataset.editDeliv);
-    openForm('deliverable', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Entrega atualizada.'); renderEventDetail(id); } });
-  });
-  document.querySelectorAll('[data-del-deliv]').forEach(b=>b.onclick=()=>{
-    confirmDelete('Excluir esta entrega?', ()=>{ DB.deliverables = DB.deliverables.filter(x=>x.id!==b.dataset.delDeliv); save(); toast('Entrega excluída.'); renderEventDetail(id); });
-  });
-  const calPrev = document.getElementById('calPrev');
-  if(calPrev) calPrev.onclick = ()=>{ agendaMonthCursor = new Date(agendaMonthCursor.getFullYear(), agendaMonthCursor.getMonth()-1, 1); renderEventDetail(id); };
-  const calNext = document.getElementById('calNext');
-  if(calNext) calNext.onclick = ()=>{ agendaMonthCursor = new Date(agendaMonthCursor.getFullYear(), agendaMonthCursor.getMonth()+1, 1); renderEventDetail(id); };
-  const calToday = document.getElementById('calToday');
-  if(calToday) calToday.onclick = ()=>{ agendaMonthCursor = new Date(); agendaMonthCursor.setDate(1); agendaMonthCursor.setHours(0,0,0,0); renderEventDetail(id); };
-
-  // rundown (live show-calling, direção técnica)
-  document.getElementById('btnAddRundown').onclick = ()=> openForm('rundownItem', {
-    onSave:(rec)=>{ rec.eventoId=id; DB.rundown.push(rec); save(); toast('Item adicionado.'); renderEventDetail(id); }
-  });
-  document.querySelectorAll('[data-edit-rundown]').forEach(b=>b.onclick=()=>{
-    const rec = byId(DB.rundown, b.dataset.editRundown);
-    openForm('rundownItem', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Item atualizado.'); renderEventDetail(id); } });
-  });
-  document.querySelectorAll('[data-del-rundown]').forEach(b=>b.onclick=()=>{
-    confirmDelete('Excluir este item de rundown?', ()=>{ DB.rundown = DB.rundown.filter(x=>x.id!==b.dataset.delRundown); save(); toast('Item excluído.'); renderEventDetail(id); });
-  });
-
-  // tasks
-  document.getElementById('btnAddTaskEv').onclick = ()=> openForm('task', {
-    data:{eventoId:id}, onSave:(rec)=>{ DB.tasks.push(rec); save(); toast('Tarefa adicionada.'); renderEventDetail(id); }
-  });
-  document.querySelectorAll('[data-edit-task]').forEach(b=>b.onclick=()=>{
-    const rec = byId(DB.tasks, b.dataset.editTask);
-    openForm('task', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Tarefa atualizada.'); renderEventDetail(id); } });
-  });
-  document.querySelectorAll('[data-del-task]').forEach(b=>b.onclick=()=>{
-    confirmDelete('Excluir esta tarefa?', ()=>{ DB.tasks = DB.tasks.filter(x=>x.id!==b.dataset.delTask); save(); toast('Tarefa excluída.'); renderEventDetail(id); });
-  });
-  document.querySelectorAll('[data-move-ev]').forEach(b=>b.onclick=()=>{
-    const rec = byId(DB.tasks, b.dataset.moveEv);
-    rec.status = b.dataset.status; save(); renderEventDetail(id);
-  });
-
-  // logística
-  document.getElementById('btnAddLogistica').onclick = ()=> openForm('logisticaItem', {
-    onSave:(rec)=>{ rec.eventoId=id; DB.logistica.push(rec); save(); toast('Item adicionado.'); renderEventDetail(id); }
-  });
-  document.querySelectorAll('[data-edit-logistica]').forEach(b=>b.onclick=()=>{
-    const rec = byId(DB.logistica, b.dataset.editLogistica);
-    openForm('logisticaItem', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Item atualizado.'); renderEventDetail(id); } });
-  });
-  document.querySelectorAll('[data-del-logistica]').forEach(b=>b.onclick=()=>{
-    confirmDelete('Excluir este item de logística?', ()=>{ DB.logistica = DB.logistica.filter(x=>x.id!==b.dataset.delLogistica); save(); toast('Item excluído.'); renderEventDetail(id); });
-  });
-
-  // incidents
-  document.getElementById('btnAddIncidentEv').onclick = ()=> openForm('incident', {
-    data:{eventoId:id}, onSave:(rec)=>{ DB.incidents.push(rec); save(); toast('Ocorrência registrada.'); renderEventDetail(id); }
-  });
-  document.querySelectorAll('[data-edit-incident]').forEach(b=>b.onclick=()=>{
-    const rec = byId(DB.incidents, b.dataset.editIncident);
-    openForm('incident', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Ocorrência atualizada.'); renderEventDetail(id); } });
-  });
-  document.querySelectorAll('[data-del-incident]').forEach(b=>b.onclick=()=>{
-    confirmDelete('Excluir esta ocorrência?', ()=>{ DB.incidents = DB.incidents.filter(x=>x.id!==b.dataset.delIncident); save(); toast('Ocorrência excluída.'); renderEventDetail(id); });
-  });
+  wireEventTab(tab, ctx);
 }
 
 /* =========================================================
@@ -1632,7 +1692,7 @@ function renderFinanceiro(){
           <thead><tr><th>Evento</th><th>Status</th><th class="num">Contrato</th><th class="num">Previsto</th><th class="num">Real</th><th class="num">Margem</th><th>Pagamentos</th></tr></thead>
           <tbody>${rows.map(r=>`
             <tr>
-              <td><a class="row-link" href="#/eventos/${r.e.id}">${escapeHtml(r.e.nome)}</a></td>
+              <td><a class="row-link" href="#/eventos/${r.e.id}/orcamento">${escapeHtml(r.e.nome)}</a></td>
               <td>${badgeForEventStatus(r.e.status)}</td>
               <td class="num">${fmtMoney(r.contrato)}</td>
               <td class="num">${fmtMoney(r.previsto)}</td>
@@ -1675,7 +1735,7 @@ function renderOcorrencias(){
             <tr>
               <td>${escapeHtml(i.titulo)}${i.descricao?`<div class="small muted">${escapeHtml(i.descricao)}</div>`:''}
                   ${i.resolucao?`<div class="small" style="color:var(--ok); margin-top:.2rem;">↳ ${escapeHtml(i.resolucao)}</div>`:''}</td>
-              <td class="small"><a class="row-link" href="#/eventos/${i.eventoId}">${escapeHtml(eventName(i.eventoId))}</a></td>
+              <td class="small"><a class="row-link" href="#/eventos/${i.eventoId}/ocorrencias">${escapeHtml(eventName(i.eventoId))}</a></td>
               <td class="small">${i.fornecedorId?escapeHtml(vendorName(i.fornecedorId)):'—'}</td>
               <td>${badgeForSeverity(i.gravidade)}</td>
               <td class="small muted">${i.data?fmtDate(i.data):'—'}</td>
