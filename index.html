@@ -270,6 +270,10 @@ td.num, th.num{ text-align:right; font-variant-numeric:tabular-nums; }
 .tm-row.drag-over{ box-shadow: inset 0 2px 0 var(--black); }
 .tm-row.drag-over td{ background:var(--g50); }
 
+/* ---------------- rundown (live) ---------------- */
+tr.rundown-live td{ background:var(--danger-bg); }
+tr.rundown-live td:first-child{ box-shadow: inset 3px 0 0 var(--danger); }
+
 /* ---------------- deliverables: agenda (calendar) ---------------- */
 .cal-head{ display:flex; align-items:center; justify-content:space-between; padding:0 0 1rem; }
 .cal-head .cal-title{ font-family:var(--display); font-weight:700; font-size:1.05rem; text-transform:capitalize; }
@@ -404,7 +408,6 @@ function seedData(){
     budgetItems: [],
     schedule: [],
     deliverables: [],
-    rundown: [],
     logistica: [],
     incidents: [
       {
@@ -423,7 +426,7 @@ function loadDB(){
     const raw = localStorage.getItem(DB_KEY);
     if(!raw) return seedData();
     const parsed = JSON.parse(raw);
-    ['events','vendors','crew','tasks','budgetItems','schedule','deliverables','rundown','logistica','incidents'].forEach(k=>{
+    ['events','vendors','crew','tasks','budgetItems','schedule','deliverables','logistica','incidents'].forEach(k=>{
       if(!Array.isArray(parsed[k])) parsed[k] = [];
     });
     return parsed;
@@ -486,7 +489,6 @@ const PAY_STATUS = ['Pendente','Parcial','Pago'];
 const SEVERITY = ['Baixa','Média','Alta','Crítica'];
 const DELIV_STATUS = ['Não iniciado','Em andamento','Concluído'];
 const TM_STATUS = ['Pendente','Em andamento','Concluído'];
-const RUNDOWN_LIVE_STATUS = ['Pendente','No ar','Concluído'];
 const LOGISTICA_TRANSPORTE = ['Frete próprio','Transportadora terceirizada','Fornecedor entrega no local','Retirar no fornecedor','Já está no local'];
 const LOGISTICA_STATUS = ['Pendente','Confirmado','Em trânsito','Entregue'];
 
@@ -514,9 +516,29 @@ function badgeForTmStatus(s){
   const map = { 'Pendente':'gray','Em andamento':'warn','Concluído':'ok' };
   return `<span class="badge ${map[s]||'gray'}">${escapeHtml(s||'Pendente')}</span>`;
 }
-function badgeForRundownLive(s){
-  const map = { 'Pendente':'gray','No ar':'danger','Concluído':'ok' };
-  return `<span class="badge ${map[s]||'gray'}">${escapeHtml(s||'Pendente')}</span>`;
+function nowISO(){ return new Date().toISOString(); }
+function hhmmFromISO(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  if(isNaN(d.getTime())) return '';
+  return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+function minutesOfHHMM(hhmm){
+  const m = String(hhmm||'').match(/^(\d{1,2}):(\d{2})$/);
+  if(!m) return null;
+  return parseInt(m[1],10)*60 + parseInt(m[2],10);
+}
+function rundownVariance(plannedHHMM, realISO){
+  const planned = minutesOfHHMM(plannedHHMM);
+  const real = minutesOfHHMM(hhmmFromISO(realISO));
+  if(planned==null || real==null) return null;
+  return real - planned; // positivo = atraso, negativo = adiantado
+}
+function varianceBadge(diff){
+  if(diff==null) return `<span class="badge gray">—</span>`;
+  if(Math.abs(diff)<=1) return `<span class="badge ok">No horário</span>`;
+  if(diff>0) return `<span class="badge danger">+${diff} min atraso</span>`;
+  return `<span class="badge info">${Math.abs(diff)} min adiantado</span>`;
 }
 function badgeForLogistica(s){
   const map = { 'Pendente':'danger','Confirmado':'info','Em trânsito':'warn','Entregue':'ok' };
@@ -649,6 +671,7 @@ function SCHEMAS(){
         {key:'responsavel', label:'Responsável', type:'text', half:true},
         {key:'local', label:'Local / palco', type:'text', half:true},
         {key:'status', label:'Status', type:'select', options:TM_STATUS.map(s=>({value:s,label:s})), half:true},
+        {key:'notaTecnica', label:'Nota técnica (áudio, vídeo, luz, playback...)', type:'textarea'},
       ]
     },
     deliverable: {
@@ -658,17 +681,6 @@ function SCHEMAS(){
         {key:'responsavel', label:'Responsável', type:'text', half:true},
         {key:'status', label:'Status', type:'select', options:DELIV_STATUS.map(s=>({value:s,label:s})), half:true},
         {key:'notas', label:'Notas', type:'textarea'},
-      ]
-    },
-    rundownItem: {
-      title:'item de rundown', fields:[
-        {key:'segmento', label:'Segmento / chamada', type:'text', required:true},
-        {key:'horario', label:'Horário de início', type:'text', placeholder:'ex: 08:00', half:true},
-        {key:'duracao', label:'Duração (min)', type:'number', half:true},
-        {key:'responsavel', label:'Responsável', type:'text', half:true},
-        {key:'local', label:'Local / palco', type:'text', half:true},
-        {key:'notaTecnica', label:'Nota técnica (áudio, vídeo, luz, playback...)', type:'textarea'},
-        {key:'status', label:'Status', type:'select', options:RUNDOWN_LIVE_STATUS.map(s=>({value:s,label:s}))},
       ]
     },
     logisticaItem: {
@@ -1182,7 +1194,7 @@ function renderDeliverablesPanel(items){
 }
 
 function eventTabContent(tab, ctx){
-  const { ev, id, budgetItems, scheduleItems, tasks, incidents, deliverables, rundownLive, logisticaItems, totalPrevisto, totalReal, margem } = ctx;
+  const { ev, id, budgetItems, scheduleItems, tasks, incidents, deliverables, logisticaItems, totalPrevisto, totalReal, margem } = ctx;
 
   if(tab==='resumo'){
     const totalDeliv = deliverables.length;
@@ -1260,7 +1272,9 @@ function eventTabContent(tab, ctx){
             <div class="kpi-label">T&amp;M</div><div class="kpi-num">${scheduleItems.length}</div><div class="kpi-sub">itens no cronograma</div>
           </a>
           <a class="card" href="#/eventos/${id}/rundown" style="text-decoration:none; color:inherit;">
-            <div class="kpi-label">Rundown</div><div class="kpi-num">${rundownLive.length}</div><div class="kpi-sub">itens na chamada</div>
+            <div class="kpi-label">Rundown</div>
+            <div class="kpi-num">${ev.eventoIniciadoEm ? `${scheduleItems.filter(s=>s.fimReal).length}/${scheduleItems.length}` : '—'}</div>
+            <div class="kpi-sub">${ev.eventoIniciadoEm ? 'atividades concluídas' : 'evento não iniciado'}</div>
           </a>
           <a class="card" href="#/eventos/${id}/logistica" style="text-decoration:none; color:inherit;">
             <div class="kpi-label">Logística</div><div class="kpi-num">${logisticaItems.length}</div><div class="kpi-sub">itens cadastrados</div>
@@ -1348,28 +1362,77 @@ function eventTabContent(tab, ctx){
   }
 
   if(tab==='rundown'){
+    const started = !!ev.eventoIniciadoEm;
+
+    if(!scheduleItems.length){
+      return `
+      <div class="panel">
+        <div class="panel-head"><h3>Rundown <span class="small muted" style="font-weight:400;">· direção técnica, dia do evento (na house)</span></h3></div>
+        <div class="panel-body pad0">
+          <div class="empty"><div class="ic">▣</div>O rundown é montado a partir do T&amp;M — cadastre os itens lá primeiro.</div>
+        </div>
+      </div>`;
+    }
+
+    if(!started){
+      return `
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Rundown <span class="small muted" style="font-weight:400;">· direção técnica, dia do evento (na house)</span></h3>
+          <button class="btn" id="btnStartEvent">▶ Iniciar evento</button>
+        </div>
+        <div class="panel-body pad0">
+          <p class="small muted" style="padding:.9rem 1.3rem 0;">Pré-visualização a partir do T&amp;M. Clique em "Iniciar evento" quando a execução começar para liberar o controle de início/fim por atividade.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Planejado</th><th>Atividade</th><th>Responsável</th><th>Nota técnica</th></tr></thead>
+            <tbody>${scheduleItems.map(s=>`
+              <tr>
+                <td class="small"><strong>${escapeHtml(s.horario||'—')}</strong></td>
+                <td>${escapeHtml(s.atividade)}${s.duracao?`<div class="small muted">${s.duracao} min${s.local?' · '+escapeHtml(s.local):''}</div>`:''}</td>
+                <td class="small muted">${escapeHtml(s.responsavel||'—')}</td>
+                <td class="small muted">${escapeHtml(s.notaTecnica||'—')}</td>
+              </tr>`).join('')}</tbody>
+          </table></div>
+        </div>
+      </div>`;
+    }
+
+    const startedItems = scheduleItems.filter(s=>s.inicioReal);
+    const lastStarted = startedItems[startedItems.length-1];
+    const overallDiff = lastStarted ? rundownVariance(lastStarted.horario, lastStarted.inicioReal) : null;
+    const doneCount = scheduleItems.filter(s=>s.fimReal).length;
+
     return `
     <div class="panel">
-      <div class="panel-head"><h3>Rundown <span class="small muted" style="font-weight:400;">· direção técnica, dia do evento (na house)</span></h3><button class="btn small" id="btnAddRundown">+ Item</button></div>
+      <div class="panel-head">
+        <h3>Rundown <span class="small muted" style="font-weight:400;">· direção técnica, dia do evento (na house)</span></h3>
+        <span class="small muted">Evento iniciado às ${hhmmFromISO(ev.eventoIniciadoEm)}</span>
+      </div>
       <div class="panel-body pad0">
-        ${rundownLive.length ? `<div class="table-wrap"><table>
-          <thead><tr><th>Início</th><th>Fim</th><th>Segmento</th><th>Responsável</th><th>Nota técnica</th><th>Status</th><th></th></tr></thead>
-          <tbody>${rundownLive.map(r=>{
-            const fim = addMinutes(r.horario, r.duracao);
-            return `<tr>
-              <td class="small"><strong>${escapeHtml(r.horario||'—')}</strong></td>
-              <td class="small muted">${fim||'—'}</td>
-              <td>${escapeHtml(r.segmento)}${r.duracao?`<div class="small muted">${r.duracao} min</div>`:''}${r.local?`<div class="small muted">${escapeHtml(r.local)}</div>`:''}</td>
-              <td class="small muted">${escapeHtml(r.responsavel||'—')}</td>
-              <td class="small muted">${escapeHtml(r.notaTecnica||'—')}</td>
-              <td>${badgeForRundownLive(r.status)}</td>
+        <div class="totals-bar" style="border-top:none;">
+          <div><div class="t">Como está o cronograma</div><div class="v">${overallDiff==null?'—':varianceBadge(overallDiff)}</div></div>
+          <div><div class="t">Atividades concluídas</div><div class="v" style="font-size:1.15rem;">${doneCount} de ${scheduleItems.length}</div></div>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Planejado</th><th>Início real</th><th>Fim real</th><th>Atividade</th><th>Variação</th><th></th></tr></thead>
+          <tbody>${scheduleItems.map(s=>{
+            const live = s.inicioReal && !s.fimReal;
+            const diff = s.inicioReal ? rundownVariance(s.horario, s.inicioReal) : null;
+            return `<tr class="${live?'rundown-live':''}">
+              <td class="small"><strong>${escapeHtml(s.horario||'—')}</strong></td>
+              <td class="small">${s.inicioReal ? hhmmFromISO(s.inicioReal) : '—'}</td>
+              <td class="small">${s.fimReal ? hhmmFromISO(s.fimReal) : '—'}</td>
+              <td>${escapeHtml(s.atividade)}${s.duracao?`<div class="small muted">${s.duracao} min${s.local?' · '+escapeHtml(s.local):''}</div>`:''}${s.notaTecnica?`<div class="small muted">🎚 ${escapeHtml(s.notaTecnica)}</div>`:''}</td>
+              <td>${s.inicioReal ? varianceBadge(diff) : '<span class="badge gray">Aguardando</span>'}</td>
               <td>
-                <button class="icon-btn" data-edit-rundown="${r.id}" title="Editar">✎</button>
-                <button class="icon-btn" data-del-rundown="${r.id}" title="Excluir">✕</button>
+                ${!s.inicioReal ? `<button class="btn secondary small" data-rd-start="${s.id}">▶ Iniciar</button>` : ''}
+                ${s.inicioReal && !s.fimReal ? `<button class="btn small" data-rd-finish="${s.id}">⏹ Finalizar</button>` : ''}
+                ${s.fimReal ? `<button class="icon-btn" data-rd-reset="${s.id}" title="Desfazer">↺</button>` : ''}
+                <button class="icon-btn" data-edit-schedule="${s.id}" title="Editar atividade">✎</button>
               </td>
             </tr>`;
           }).join('')}</tbody>
-        </table></div>` : `<div class="empty"><div class="ic">▣</div>Nenhum item de rundown ainda.</div>`}
+        </table></div>
       </div>
     </div>`;
   }
@@ -1553,15 +1616,32 @@ function wireEventTab(tab, ctx){
   }
 
   if(tab==='rundown'){
-    document.getElementById('btnAddRundown').onclick = ()=> openForm('rundownItem', {
-      onSave:(rec)=>{ rec.eventoId=id; DB.rundown.push(rec); save(); toast('Item adicionado.'); renderEventDetail(id, tab); }
+    const btnStart = document.getElementById('btnStartEvent');
+    if(btnStart) btnStart.onclick = ()=>{
+      const ev2 = byId(DB.events, id);
+      ev2.eventoIniciadoEm = nowISO();
+      save(); toast('Evento iniciado.'); renderEventDetail(id, tab);
+    };
+    document.querySelectorAll('[data-rd-start]').forEach(b=>b.onclick=()=>{
+      const rec = byId(DB.schedule, b.dataset.rdStart);
+      rec.inicioReal = nowISO();
+      save(); renderEventDetail(id, tab);
     });
-    document.querySelectorAll('[data-edit-rundown]').forEach(b=>b.onclick=()=>{
-      const rec = byId(DB.rundown, b.dataset.editRundown);
-      openForm('rundownItem', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Item atualizado.'); renderEventDetail(id, tab); } });
+    document.querySelectorAll('[data-rd-finish]').forEach(b=>b.onclick=()=>{
+      const rec = byId(DB.schedule, b.dataset.rdFinish);
+      rec.fimReal = nowISO();
+      save(); renderEventDetail(id, tab);
     });
-    document.querySelectorAll('[data-del-rundown]').forEach(b=>b.onclick=()=>{
-      confirmDelete('Excluir este item de rundown?', ()=>{ DB.rundown = DB.rundown.filter(x=>x.id!==b.dataset.delRundown); save(); toast('Item excluído.'); renderEventDetail(id, tab); });
+    document.querySelectorAll('[data-rd-reset]').forEach(b=>b.onclick=()=>{
+      confirmDelete('Desfazer o início/fim registrados desta atividade?', ()=>{
+        const rec = byId(DB.schedule, b.dataset.rdReset);
+        delete rec.inicioReal; delete rec.fimReal;
+        save(); renderEventDetail(id, tab);
+      });
+    });
+    document.querySelectorAll('[data-edit-schedule]').forEach(b=>b.onclick=()=>{
+      const rec = byId(DB.schedule, b.dataset.editSchedule);
+      openForm('scheduleItem', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); recomputeTM(id); save(); toast('Atividade atualizada.'); renderEventDetail(id, tab); } });
     });
   }
 
@@ -1625,14 +1705,13 @@ function renderEventDetail(id, tabKey){
   const tasks = DB.tasks.filter(t=>t.eventoId===id);
   const incidents = DB.incidents.filter(i=>i.eventoId===id);
   const deliverables = DB.deliverables.filter(d=>d.eventoId===id);
-  const rundownLive = [...DB.rundown.filter(r=>r.eventoId===id)].sort((a,b)=>(a.horario||'').localeCompare(b.horario||''));
   const logisticaItems = DB.logistica.filter(l=>l.eventoId===id);
 
   const totalPrevisto = budgetItems.reduce((s,b)=>s+(Number(b.valorPrevisto)||0),0);
   const totalReal = budgetItems.reduce((s,b)=>s+(Number(b.valorReal)||0),0);
   const margem = (Number(ev.valorContrato)||0) - totalReal;
 
-  const ctx = { ev, id, budgetItems, scheduleItems, tasks, incidents, deliverables, rundownLive, logisticaItems, totalPrevisto, totalReal, margem };
+  const ctx = { ev, id, budgetItems, scheduleItems, tasks, incidents, deliverables, logisticaItems, totalPrevisto, totalReal, margem };
 
   const html = `
     <div class="event-header">
@@ -1661,7 +1740,7 @@ function renderEventDetail(id, tabKey){
 
   document.getElementById('btnEditEvent').onclick = ()=>openEventForm(ev);
   document.getElementById('btnDeleteEvent').onclick = ()=>{
-    confirmDelete(`Excluir o evento <strong>${escapeHtml(ev.nome)}</strong>? Entregas, orçamento, T&amp;M, rundown, logística, tarefas e ocorrências vinculados a ele permanecerão, mas sem evento associado.`, ()=>{
+    confirmDelete(`Excluir o evento <strong>${escapeHtml(ev.nome)}</strong>? Entregas, orçamento, T&amp;M (com o rundown), logística, tarefas e ocorrências vinculados a ele permanecerão, mas sem evento associado.`, ()=>{
       DB.events = DB.events.filter(e=>e.id!==id);
       save(); toast('Evento excluído.');
       location.hash = '#/eventos';
@@ -1968,7 +2047,7 @@ document.getElementById('importFile').onchange = (e)=>{
   reader.onload = ()=>{
     try{
       const parsed = JSON.parse(reader.result);
-      ['events','vendors','crew','tasks','budgetItems','schedule','deliverables','rundown','logistica','incidents'].forEach(k=>{
+      ['events','vendors','crew','tasks','budgetItems','schedule','deliverables','logistica','incidents'].forEach(k=>{
         if(!Array.isArray(parsed[k])) parsed[k] = [];
       });
       DB = parsed; save(); toast('Backup importado com sucesso.'); router();
