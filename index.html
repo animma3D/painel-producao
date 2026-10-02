@@ -1367,9 +1367,12 @@ function eventTabContent(tab, ctx){
     if(!scheduleItems.length){
       return `
       <div class="panel">
-        <div class="panel-head"><h3>Rundown <span class="small muted" style="font-weight:400;">· direção técnica, dia do evento (na house)</span></h3></div>
+        <div class="panel-head">
+          <h3>Rundown <span class="small muted" style="font-weight:400;">· direção técnica, dia do evento (na house)</span></h3>
+          <button class="btn small" id="btnAddRundownItem">+ Item</button>
+        </div>
         <div class="panel-body pad0">
-          <div class="empty"><div class="ic">▣</div>O rundown é montado a partir do T&amp;M — cadastre os itens lá primeiro.</div>
+          <div class="empty"><div class="ic">▣</div>Nenhum item ainda — o rundown é montado a partir do T&amp;M, mas você também pode incluir direto por aqui.</div>
         </div>
       </div>`;
     }
@@ -1379,18 +1382,23 @@ function eventTabContent(tab, ctx){
       <div class="panel">
         <div class="panel-head">
           <h3>Rundown <span class="small muted" style="font-weight:400;">· direção técnica, dia do evento (na house)</span></h3>
-          <button class="btn" id="btnStartEvent">▶ Iniciar evento</button>
+          <div style="display:flex; gap:.6rem;">
+            <button class="btn secondary small" id="btnAddRundownItem">+ Item</button>
+            <button class="btn" id="btnStartEvent">▶ Iniciar evento</button>
+          </div>
         </div>
         <div class="panel-body pad0">
-          <p class="small muted" style="padding:.9rem 1.3rem 0;">Pré-visualização a partir do T&amp;M. Clique em "Iniciar evento" quando a execução começar para liberar o controle de início/fim por atividade.</p>
+          <p class="small muted" style="padding:.9rem 1.3rem 0;">Pré-visualização a partir do T&amp;M. Arraste pelo ⠿ para reordenar. Clique em "Iniciar evento" quando a execução começar para liberar o controle de início/fim por atividade.</p>
           <div class="table-wrap"><table>
-            <thead><tr><th>Planejado</th><th>Atividade</th><th>Responsável</th><th>Nota técnica</th></tr></thead>
+            <thead><tr><th></th><th>Planejado</th><th>Atividade</th><th>Responsável</th><th>Nota técnica</th><th></th></tr></thead>
             <tbody>${scheduleItems.map(s=>`
-              <tr>
+              <tr class="tm-row" draggable="true" data-tm-id="${s.id}">
+                <td class="drag-handle" title="Arrastar para reordenar">⠿</td>
                 <td class="small"><strong>${escapeHtml(s.horario||'—')}</strong></td>
                 <td>${escapeHtml(s.atividade)}${s.duracao?`<div class="small muted">${s.duracao} min${s.local?' · '+escapeHtml(s.local):''}</div>`:''}</td>
                 <td class="small muted">${escapeHtml(s.responsavel||'—')}</td>
                 <td class="small muted">${escapeHtml(s.notaTecnica||'—')}</td>
+                <td><button class="icon-btn" data-edit-schedule="${s.id}" title="Editar">✎</button></td>
               </tr>`).join('')}</tbody>
           </table></div>
         </div>
@@ -1406,19 +1414,24 @@ function eventTabContent(tab, ctx){
     <div class="panel">
       <div class="panel-head">
         <h3>Rundown <span class="small muted" style="font-weight:400;">· direção técnica, dia do evento (na house)</span></h3>
-        <span class="small muted">Evento iniciado às ${hhmmFromISO(ev.eventoIniciadoEm)}</span>
+        <div style="display:flex; align-items:center; gap:.9rem;">
+          <span class="small muted">Evento iniciado às ${hhmmFromISO(ev.eventoIniciadoEm)}</span>
+          <button class="btn secondary small" id="btnAddRundownItem">+ Item</button>
+        </div>
       </div>
       <div class="panel-body pad0">
         <div class="totals-bar" style="border-top:none;">
           <div><div class="t">Como está o cronograma</div><div class="v">${overallDiff==null?'—':varianceBadge(overallDiff)}</div></div>
           <div><div class="t">Atividades concluídas</div><div class="v" style="font-size:1.15rem;">${doneCount} de ${scheduleItems.length}</div></div>
         </div>
+        <p class="small muted" style="padding:.9rem 1.3rem 0;">Arraste pelo ⠿ para reordenar o que ainda não começou — os horários planejados recalculam sozinhos.</p>
         <div class="table-wrap"><table>
-          <thead><tr><th>Planejado</th><th>Início real</th><th>Fim real</th><th>Atividade</th><th>Variação</th><th></th></tr></thead>
+          <thead><tr><th></th><th>Planejado</th><th>Início real</th><th>Fim real</th><th>Atividade</th><th>Variação</th><th></th></tr></thead>
           <tbody>${scheduleItems.map(s=>{
             const live = s.inicioReal && !s.fimReal;
             const diff = s.inicioReal ? rundownVariance(s.horario, s.inicioReal) : null;
-            return `<tr class="${live?'rundown-live':''}">
+            return `<tr class="tm-row ${live?'rundown-live':''}" draggable="true" data-tm-id="${s.id}">
+              <td class="drag-handle" title="Arrastar para reordenar">⠿</td>
               <td class="small"><strong>${escapeHtml(s.horario||'—')}</strong></td>
               <td class="small">${s.inicioReal ? hhmmFromISO(s.inicioReal) : '—'}</td>
               <td class="small">${s.fimReal ? hhmmFromISO(s.fimReal) : '—'}</td>
@@ -1622,6 +1635,11 @@ function wireEventTab(tab, ctx){
       ev2.eventoIniciadoEm = nowISO();
       save(); toast('Evento iniciado.'); renderEventDetail(id, tab);
     };
+    const btnAddItem = document.getElementById('btnAddRundownItem');
+    if(btnAddItem) btnAddItem.onclick = ()=> openForm('scheduleItem', {
+      extraNote:'Esse item entra tanto no T&M quanto no Rundown — eles são a mesma base.',
+      onSave:(rec)=>{ rec.eventoId=id; rec.ordem = nextTmOrdem(id); DB.schedule.push(rec); recomputeTM(id); save(); toast('Item adicionado.'); renderEventDetail(id, tab); }
+    });
     document.querySelectorAll('[data-rd-start]').forEach(b=>b.onclick=()=>{
       const rec = byId(DB.schedule, b.dataset.rdStart);
       rec.inicioReal = nowISO();
@@ -1642,6 +1660,33 @@ function wireEventTab(tab, ctx){
     document.querySelectorAll('[data-edit-schedule]').forEach(b=>b.onclick=()=>{
       const rec = byId(DB.schedule, b.dataset.editSchedule);
       openForm('scheduleItem', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); recomputeTM(id); save(); toast('Atividade atualizada.'); renderEventDetail(id, tab); } });
+    });
+
+    let dragTmId = null;
+    document.querySelectorAll('.tm-row').forEach(row=>{
+      row.addEventListener('dragstart', ()=>{
+        dragTmId = row.dataset.tmId;
+        row.classList.add('dragging');
+      });
+      row.addEventListener('dragend', ()=>{
+        row.classList.remove('dragging');
+      });
+      row.addEventListener('dragover', (e)=>{
+        e.preventDefault();
+        row.classList.add('drag-over');
+      });
+      row.addEventListener('dragleave', ()=>{
+        row.classList.remove('drag-over');
+      });
+      row.addEventListener('drop', (e)=>{
+        e.preventDefault();
+        row.classList.remove('drag-over');
+        const targetId = row.dataset.tmId;
+        if(!dragTmId || dragTmId===targetId) return;
+        reorderTM(id, dragTmId, targetId);
+        dragTmId = null;
+        renderEventDetail(id, tab);
+      });
     });
   }
 
