@@ -807,8 +807,8 @@ function setTop(title, sub, actionsHtml){
 }
 
 const EVENT_TABS = [
-  { key:'entregas', label:'Entregas' },
   { key:'orcamento', label:'Orçamento' },
+  { key:'entregas', label:'Entregas' },
   { key:'tm', label:'T&M' },
   { key:'rundown', label:'Rundown' },
   { key:'logistica', label:'Logística' },
@@ -1431,7 +1431,7 @@ function renderEventDetail(id, tabKey){
   const ev = byId(DB.events, id);
   if(!ev){ location.hash = '#/eventos'; return; }
   const validKeys = EVENT_TABS.map(t=>t.key);
-  const tab = validKeys.includes(tabKey) ? tabKey : 'entregas';
+  const tab = validKeys.includes(tabKey) ? tabKey : 'orcamento';
 
   setTop(ev.nome, 'Detalhe do evento', `
     <button class="btn secondary small" id="btnEditEvent">Editar evento</button>
