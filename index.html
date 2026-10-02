@@ -264,6 +264,12 @@ td.num, th.num{ text-align:right; font-variant-numeric:tabular-nums; }
 /* ---------------- deliverables: lista view strip ---------------- */
 .overdue-flag{ color:var(--danger); font-weight:700; font-size:.72rem; margin-left:.4rem; }
 
+/* ---------------- T&M drag reorder ---------------- */
+.tm-row td.drag-handle{ width:1.8rem; text-align:center; color:var(--g300); cursor:grab; font-size:.95rem; }
+.tm-row.dragging{ opacity:.4; }
+.tm-row.drag-over{ box-shadow: inset 0 2px 0 var(--black); }
+.tm-row.drag-over td{ background:var(--g50); }
+
 /* ---------------- deliverables: agenda (calendar) ---------------- */
 .cal-head{ display:flex; align-items:center; justify-content:space-between; padding:0 0 1rem; }
 .cal-head .cal-title{ font-family:var(--display); font-weight:700; font-size:1.05rem; text-transform:capitalize; }
@@ -527,11 +533,39 @@ function isOverdue(item){
 }
 function addMinutes(hhmm, minutes){
   const m = String(hhmm||'').match(/^(\d{1,2}):(\d{2})$/);
-  if(!m || !minutes) return '';
-  const total = parseInt(m[1],10)*60 + parseInt(m[2],10) + Number(minutes);
+  if(!m) return '';
+  const mins = Number(minutes);
+  if(!Number.isFinite(mins)) return '';
+  const total = parseInt(m[1],10)*60 + parseInt(m[2],10) + mins;
   const h = Math.floor((total%1440+1440)%1440/60);
   const mi = ((total%60)+60)%60;
   return String(h).padStart(2,'0')+':'+String(mi).padStart(2,'0');
+}
+function nextTmOrdem(eventId){
+  const items = DB.schedule.filter(s=>s.eventoId===eventId);
+  return items.length ? Math.max(...items.map(i=>Number(i.ordem)||0))+1 : 0;
+}
+function recomputeTM(eventId){
+  const ev = byId(DB.events, eventId);
+  const items = DB.schedule.filter(s=>s.eventoId===eventId).sort((a,b)=>(Number(a.ordem)||0)-(Number(b.ordem)||0));
+  let cursor = (ev && ev.tmHoraInicio) || '08:00';
+  if(!/^\d{1,2}:\d{2}$/.test(cursor)) cursor = '08:00';
+  items.forEach(it=>{
+    it.horario = cursor;
+    const next = addMinutes(cursor, it.duracao);
+    cursor = next || cursor;
+  });
+}
+function reorderTM(eventId, draggedId, targetId){
+  const items = DB.schedule.filter(s=>s.eventoId===eventId).sort((a,b)=>(Number(a.ordem)||0)-(Number(b.ordem)||0));
+  const fromIdx = items.findIndex(i=>i.id===draggedId);
+  const toIdx = items.findIndex(i=>i.id===targetId);
+  if(fromIdx===-1 || toIdx===-1) return;
+  const [moved] = items.splice(fromIdx,1);
+  items.splice(toIdx,0,moved);
+  items.forEach((it,idx)=>{ it.ordem = idx; });
+  recomputeTM(eventId);
+  save();
 }
 function stars(n){
   n = Number(n)||0;
@@ -611,8 +645,7 @@ function SCHEMAS(){
     scheduleItem: {
       title:'item de T&M', fields:[
         {key:'atividade', label:'Atividade', type:'text', required:true},
-        {key:'horario', label:'Horário de início', type:'text', placeholder:'ex: 08:00', half:true},
-        {key:'duracao', label:'Duração (min)', type:'number', half:true},
+        {key:'duracao', label:'Duração (min)', type:'number', required:true, half:true},
         {key:'responsavel', label:'Responsável', type:'text', half:true},
         {key:'local', label:'Local / palco', type:'text', half:true},
         {key:'status', label:'Status', type:'select', options:TM_STATUS.map(s=>({value:s,label:s})), half:true},
@@ -1279,13 +1312,24 @@ function eventTabContent(tab, ctx){
   if(tab==='tm'){
     return `
     <div class="panel">
-      <div class="panel-head"><h3>T&amp;M <span class="small muted" style="font-weight:400;">· Tempos e Movimentos (cronograma do evento)</span></h3><button class="btn small" id="btnAddSchedule">+ Item</button></div>
+      <div class="panel-head">
+        <h3>T&amp;M <span class="small muted" style="font-weight:400;">· Tempos e Movimentos (cronograma do evento)</span></h3>
+        <div style="display:flex; align-items:center; gap:.9rem;">
+          <label class="small muted" style="display:flex; align-items:center; gap:.4rem;">
+            Início
+            <input type="text" id="tmHoraInicio" value="${escapeHtml(ev.tmHoraInicio||'08:00')}" placeholder="08:00"
+              style="width:4.2rem; padding:.35rem .5rem; border:1px solid var(--line); border-radius:var(--radius); font-size:.82rem; text-align:center;">
+          </label>
+          <button class="btn small" id="btnAddSchedule">+ Item</button>
+        </div>
+      </div>
       <div class="panel-body pad0">
-        ${scheduleItems.length ? `<div class="table-wrap"><table>
-          <thead><tr><th>Início</th><th>Fim</th><th>Atividade</th><th>Responsável</th><th>Local</th><th>Status</th><th></th></tr></thead>
+        ${scheduleItems.length ? `<p class="small muted" style="padding:.9rem 1.3rem 0;">Arraste pelo ⠿ para reordenar — os horários recalculam sozinhos a partir da duração de cada item.</p><div class="table-wrap"><table>
+          <thead><tr><th></th><th>Início</th><th>Fim</th><th>Atividade</th><th>Responsável</th><th>Local</th><th>Status</th><th></th></tr></thead>
           <tbody>${scheduleItems.map(s=>{
             const fim = addMinutes(s.horario, s.duracao);
-            return `<tr>
+            return `<tr class="tm-row" draggable="true" data-tm-id="${s.id}">
+              <td class="drag-handle" title="Arrastar para reordenar">⠿</td>
               <td class="small"><strong>${escapeHtml(s.horario||'—')}</strong></td>
               <td class="small muted">${fim||'—'}</td>
               <td>${escapeHtml(s.atividade)}${s.duracao?`<div class="small muted">${s.duracao} min</div>`:''}</td>
@@ -1430,14 +1474,59 @@ function wireEventTab(tab, ctx){
 
   if(tab==='tm'){
     document.getElementById('btnAddSchedule').onclick = ()=> openForm('scheduleItem', {
-      onSave:(rec)=>{ rec.eventoId=id; DB.schedule.push(rec); save(); toast('Item adicionado.'); renderEventDetail(id, tab); }
+      extraNote:'O horário de início é calculado automaticamente pela ordem e pela duração — arraste os itens na lista para reordenar.',
+      onSave:(rec)=>{ rec.eventoId=id; rec.ordem = nextTmOrdem(id); DB.schedule.push(rec); recomputeTM(id); save(); toast('Item adicionado.'); renderEventDetail(id, tab); }
     });
     document.querySelectorAll('[data-edit-schedule]').forEach(b=>b.onclick=()=>{
       const rec = byId(DB.schedule, b.dataset.editSchedule);
-      openForm('scheduleItem', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Item atualizado.'); renderEventDetail(id, tab); } });
+      openForm('scheduleItem', {
+        data:rec,
+        extraNote:'O horário de início é calculado automaticamente pela ordem e pela duração — arraste os itens na lista para reordenar.',
+        onSave:(updated)=>{ Object.assign(rec, updated); recomputeTM(id); save(); toast('Item atualizado.'); renderEventDetail(id, tab); }
+      });
     });
     document.querySelectorAll('[data-del-schedule]').forEach(b=>b.onclick=()=>{
-      confirmDelete('Excluir este item de T&M?', ()=>{ DB.schedule = DB.schedule.filter(x=>x.id!==b.dataset.delSchedule); save(); toast('Item excluído.'); renderEventDetail(id, tab); });
+      confirmDelete('Excluir este item de T&M?', ()=>{ DB.schedule = DB.schedule.filter(x=>x.id!==b.dataset.delSchedule); recomputeTM(id); save(); toast('Item excluído.'); renderEventDetail(id, tab); });
+    });
+
+    const tmHoraInicioInput = document.getElementById('tmHoraInicio');
+    if(tmHoraInicioInput){
+      tmHoraInicioInput.addEventListener('change', ()=>{
+        const v = tmHoraInicioInput.value.trim();
+        if(!/^\d{1,2}:\d{2}$/.test(v)){ toast('Use o formato HH:MM, ex: 08:00'); return; }
+        const ev2 = byId(DB.events, id);
+        ev2.tmHoraInicio = v;
+        recomputeTM(id);
+        save();
+        renderEventDetail(id, tab);
+      });
+    }
+
+    let dragTmId = null;
+    document.querySelectorAll('.tm-row').forEach(row=>{
+      row.addEventListener('dragstart', ()=>{
+        dragTmId = row.dataset.tmId;
+        row.classList.add('dragging');
+      });
+      row.addEventListener('dragend', ()=>{
+        row.classList.remove('dragging');
+      });
+      row.addEventListener('dragover', (e)=>{
+        e.preventDefault();
+        row.classList.add('drag-over');
+      });
+      row.addEventListener('dragleave', ()=>{
+        row.classList.remove('drag-over');
+      });
+      row.addEventListener('drop', (e)=>{
+        e.preventDefault();
+        row.classList.remove('drag-over');
+        const targetId = row.dataset.tmId;
+        if(!dragTmId || dragTmId===targetId) return;
+        reorderTM(id, dragTmId, targetId);
+        dragTmId = null;
+        renderEventDetail(id, tab);
+      });
     });
   }
 
@@ -1532,7 +1621,7 @@ function renderEventDetail(id, tabKey){
   `);
 
   const budgetItems = DB.budgetItems.filter(b=>b.eventoId===id);
-  const scheduleItems = [...DB.schedule.filter(s=>s.eventoId===id)].sort((a,b)=>(a.horario||'').localeCompare(b.horario||''));
+  const scheduleItems = [...DB.schedule.filter(s=>s.eventoId===id)].sort((a,b)=>(Number(a.ordem)||0)-(Number(b.ordem)||0));
   const tasks = DB.tasks.filter(t=>t.eventoId===id);
   const incidents = DB.incidents.filter(i=>i.eventoId===id);
   const deliverables = DB.deliverables.filter(d=>d.eventoId===id);
