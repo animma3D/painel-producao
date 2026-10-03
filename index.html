@@ -427,7 +427,7 @@ function seedData(){
       {
         id: eventId, nome:'IX Encontro Nacional Mini Kalzone', cliente:'Agência Diferencial',
         local:'Costão do Santinho, Florianópolis - SC', dataInicio:'2026-09-16', dataFim:'2026-09-18',
-        status:'Em produção', participantes:200, valorContrato:0,
+        status:'Em produção', participantes:200,
         notas:'Produção completa (ponta a ponta) pela Agência Diferencial.'
       }
     ],
@@ -553,9 +553,8 @@ function eventBudgetSummary(ev){
   const honorarios = base * honorarioPct / 100;
   // comissão: dinheiro que entra para mim, cobrado do fornecedor, linha a linha
   const comissoes = items.reduce((s,b)=>s+lineComissao(b),0);
-  const contrato = Number(ev.valorContrato)||0;
   return { items, previsto, real, base, honorarioPct, honorarios, comissoes,
-           lucro: honorarios + comissoes, contrato, margemContrato: contrato - real };
+           lucro: honorarios + comissoes };
 }
 function nameOrDash(obj, key){ return obj && obj[key] ? obj[key] : '—'; }
 
@@ -709,7 +708,6 @@ function SCHEMAS(){
         {key:'dataDesmontagem', label:'Data da desmontagem', type:'date', half:true},
         {key:'status', label:'Status', type:'select', options:EVENT_STATUS.map(s=>({value:s,label:s})), half:true},
         {key:'participantes', label:'Participantes', type:'number', half:true},
-        {key:'valorContrato', label:'Valor do contrato (R$)', type:'number', step:'0.01', half:true},
         {key:'honorarioGeralPct', label:'Honorários do evento (% sobre o custo total)', type:'number', step:'0.01'},
         {key:'notas', label:'Notas', type:'textarea'},
       ]
@@ -1108,7 +1106,7 @@ function renderDashboard(){
   const pendingTasks = DB.tasks.filter(t=>t.status!=='Concluída').sort((a,b)=>(a.prazo||'9999').localeCompare(b.prazo||'9999')).slice(0,6);
   const mineEvents = DB.events.filter(eventEntraFinanceiro);
   const mineIds = new Set(mineEvents.map(e=>e.id));
-  const totalContrato = mineEvents.reduce((s,e)=>s+(Number(e.valorContrato)||0),0);
+  const totalLucro = mineEvents.reduce((s,e)=>s+eventBudgetSummary(e).lucro,0);
   const totalReal = DB.budgetItems.filter(b=>mineIds.has(b.eventoId)).reduce((s,b)=>s+(Number(b.valorReal)||0),0);
   const recentIncidents = [...DB.incidents].reverse().slice(0,4);
 
@@ -1116,7 +1114,7 @@ function renderDashboard(){
     <div class="cards">
       <div class="card"><div class="kpi-label">Eventos ativos</div><div class="kpi-num">${activeEvents.length}</div><div class="kpi-sub">de ${DB.events.length} no total</div></div>
       <div class="card"><div class="kpi-label">Tarefas pendentes</div><div class="kpi-num">${DB.tasks.filter(t=>t.status!=='Concluída').length}</div><div class="kpi-sub">${DB.tasks.filter(t=>t.status==='Concluída').length} concluídas</div></div>
-      <div class="card"><div class="kpi-label">Valor contratado</div><div class="kpi-num" style="font-size:1.5rem;">${fmtMoney(totalContrato)}</div><div class="kpi-sub">só eventos que entram no meu financeiro</div></div>
+      <div class="card"><div class="kpi-label">Lucro</div><div class="kpi-num" style="font-size:1.5rem; color:${totalLucro<0?'var(--danger)':'var(--ok)'}">${fmtMoney(totalLucro)}</div><div class="kpi-sub">honorários + comissões · só eventos meus</div></div>
       <div class="card"><div class="kpi-label">Custo real registrado</div><div class="kpi-num" style="font-size:1.5rem;">${fmtMoney(totalReal)}</div><div class="kpi-sub">só eventos que entram no meu financeiro</div></div>
     </div>
 
@@ -1266,7 +1264,7 @@ function renderEventos(){
   }).sort((a,b)=>(b.dataInicio||'').localeCompare(a.dataInicio||''));
 
   const listaHtml = list.length ? `<div class="table-wrap"><table>
-          <thead><tr><th>Evento</th><th>Cliente</th><th>Agência</th><th>Datas</th><th>Status</th><th class="num">Participantes</th><th class="num">Valor contrato</th><th></th></tr></thead>
+          <thead><tr><th>Evento</th><th>Cliente</th><th>Agência</th><th>Datas</th><th>Status</th><th class="num">Participantes</th><th></th></tr></thead>
           <tbody>
             ${list.map(e=>`
               <tr>
@@ -1276,7 +1274,6 @@ function renderEventos(){
                 <td class="small">${eventDatesCell(e)}</td>
                 <td>${badgeForEventStatus(e.status)}</td>
                 <td class="num">${e.participantes||'—'}</td>
-                <td class="num">${fmtMoney(e.valorContrato)}</td>
                 <td><a class="icon-btn" href="#/eventos/${e.id}" title="Abrir">→</a></td>
               </tr>`).join('')}
           </tbody>
@@ -1490,9 +1487,10 @@ function renderDeliverablesPanel(items){
 }
 
 function eventTabContent(tab, ctx){
-  const { ev, id, budgetItems, scheduleItems, tasks, incidents, deliverables, logisticaItems, totalPrevisto, totalReal, margem } = ctx;
+  const { ev, id, budgetItems, scheduleItems, tasks, incidents, deliverables, logisticaItems, totalPrevisto, totalReal } = ctx;
 
   if(tab==='resumo'){
+    const smR = eventBudgetSummary(ev);
     const totalDeliv = deliverables.length;
     const doneDeliv = deliverables.filter(d=>d.status==='Concluído').length;
     const pctDeliv = totalDeliv ? Math.round(doneDeliv/totalDeliv*100) : null;
@@ -1518,17 +1516,19 @@ function eventTabContent(tab, ctx){
         <div class="kpi-sub">${totalDeliv? `${doneDeliv} de ${totalDeliv} concluídas` : 'nenhuma entrega cadastrada'}</div>
       </div>
       <div class="card">
-        <div class="kpi-label">Valor contratado</div>
-        <div class="kpi-num" style="font-size:1.5rem;">${fmtMoney(ev.valorContrato)}</div>
-      </div>
-      <div class="card">
         <div class="kpi-label">Custo real</div>
         <div class="kpi-num" style="font-size:1.5rem;">${fmtMoney(totalReal)}</div>
         <div class="kpi-sub">previsto ${fmtMoney(totalPrevisto)}</div>
       </div>
       <div class="card">
-        <div class="kpi-label">Margem estimada</div>
-        <div class="kpi-num" style="font-size:1.5rem; color:${margem<0?'var(--danger)':'var(--ok)'}">${fmtMoney(margem)}</div>
+        <div class="kpi-label">Honorários</div>
+        <div class="kpi-num" style="font-size:1.5rem;">${fmtMoney(smR.honorarios)}</div>
+        <div class="kpi-sub">${smR.honorarioPct}% sobre o custo</div>
+      </div>
+      <div class="card">
+        <div class="kpi-label">Lucro</div>
+        <div class="kpi-num" style="font-size:1.5rem; color:${smR.lucro<0?'var(--danger)':'var(--ok)'}">${fmtMoney(smR.lucro)}</div>
+        <div class="kpi-sub">honorários + comissões</div>
       </div>
     </div>
 
@@ -1615,10 +1615,6 @@ function eventTabContent(tab, ctx){
           <div><div class="t">Honorários</div><div class="v">${fmtMoney(sm.honorarios)}</div><div class="small muted">${sm.honorarioPct}% sobre ${fmtMoney(sm.base)}</div></div>
           <div><div class="t">Comissões</div><div class="v">${fmtMoney(sm.comissoes)}</div></div>
           <div><div class="t">Lucro (honorários + comissões)</div><div class="v" style="color:${sm.lucro<0?'var(--danger)':'var(--ok)'}">${fmtMoney(sm.lucro)}</div></div>
-        </div>
-        <div class="totals-bar" style="border-top:none; padding-top:0;">
-          <div><div class="t">Contrato</div><div class="v">${fmtMoney(sm.contrato)}</div></div>
-          <div><div class="t">Margem sobre o contrato</div><div class="v" style="color:${sm.margemContrato<0?'var(--danger)':'var(--ok)'}">${fmtMoney(sm.margemContrato)}</div></div>
         </div>
         ${!agencyOf(ev) ? '<p class="small muted" style="padding:0 1.3rem 1.1rem;">Defina a agência deste evento (Editar evento) para saber se esse lucro entra no seu financeiro.</p>'
           : (eventEntraFinanceiro(ev) ? '<p class="small muted" style="padding:0 1.3rem 1.1rem;">Agência <strong>'+escapeHtml(agencyName(ev))+'</strong>: o lucro deste orçamento entra no seu financeiro.</p>'
@@ -2086,9 +2082,8 @@ function renderEventDetail(id, tabKey){
 
   const totalPrevisto = budgetItems.reduce((s,b)=>s+(Number(b.valorPrevisto)||0),0);
   const totalReal = budgetItems.reduce((s,b)=>s+(Number(b.valorReal)||0),0);
-  const margem = (Number(ev.valorContrato)||0) - totalReal;
 
-  const ctx = { ev, id, budgetItems, scheduleItems, tasks, incidents, deliverables, logisticaItems, totalPrevisto, totalReal, margem };
+  const ctx = { ev, id, budgetItems, scheduleItems, tasks, incidents, deliverables, logisticaItems, totalPrevisto, totalReal };
 
   const html = `
     <div class="event-header">
@@ -2374,22 +2369,21 @@ function renderFinanceiro(){
 
   const html = `
     <div class="cards">
-      <div class="card"><div class="kpi-label">Total contratado</div><div class="kpi-num" style="font-size:1.6rem;">${fmtMoney(tot('contrato'))}</div></div>
       <div class="card"><div class="kpi-label">Custo real</div><div class="kpi-num" style="font-size:1.6rem;">${fmtMoney(tot('real'))}</div></div>
       <div class="card"><div class="kpi-label">Honorários</div><div class="kpi-num" style="font-size:1.6rem;">${fmtMoney(tot('honorarios'))}</div></div>
-      <div class="card"><div class="kpi-label">Lucro</div><div class="kpi-num" style="font-size:1.6rem; color:${tot('lucro')<0?'var(--danger)':'var(--ok)'}">${fmtMoney(tot('lucro'))}</div><div class="kpi-sub">honorários + comissões (${fmtMoney(tot('comissoes'))})</div></div>
+      <div class="card"><div class="kpi-label">Comissões</div><div class="kpi-num" style="font-size:1.6rem;">${fmtMoney(tot('comissoes'))}</div></div>
+      <div class="card"><div class="kpi-label">Lucro</div><div class="kpi-num" style="font-size:1.6rem; color:${tot('lucro')<0?'var(--danger)':'var(--ok)'}">${fmtMoney(tot('lucro'))}</div><div class="kpi-sub">honorários + comissões</div></div>
     </div>
     <div class="panel">
       <div class="panel-head"><h3>Por evento</h3></div>
       <div class="panel-body pad0">
         ${rows.length ? `<div class="table-wrap"><table>
-          <thead><tr><th>Evento</th><th>Agência</th><th>Status</th><th class="num">Contrato</th><th class="num">Custo real</th><th class="num">Honorários</th><th class="num">Comissões</th><th class="num">Lucro</th><th>Pagamentos</th></tr></thead>
+          <thead><tr><th>Evento</th><th>Agência</th><th>Status</th><th class="num">Custo real</th><th class="num">Honorários</th><th class="num">Comissões</th><th class="num">Lucro</th><th>Pagamentos</th></tr></thead>
           <tbody>${rows.map(r=>`
             <tr>
               <td><a class="row-link" href="#/eventos/${r.e.id}/orcamento">${escapeHtml(r.e.nome)}</a></td>
               <td class="small">${escapeHtml(agencyName(r.e))}</td>
               <td>${badgeForEventStatus(r.e.status)}</td>
-              <td class="num">${fmtMoney(r.sm.contrato)}</td>
               <td class="num">${fmtMoney(r.sm.real)}</td>
               <td class="num">${fmtMoney(r.sm.honorarios)}</td>
               <td class="num">${fmtMoney(r.sm.comissoes)}</td>
