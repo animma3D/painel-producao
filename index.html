@@ -90,22 +90,32 @@ input,select,textarea{ font-family:var(--body); }
   .topbar{ padding:1rem 1.2rem; }
   .view{ padding:1.3rem 1.1rem 3rem; }
 }
+.nav-link.mobile-only{ display:none; }
 @media (max-width:620px){
-  :root{ --sidebar-w:60px; }
-  .sidebar-logo{ padding:1rem .6rem; display:flex; justify-content:center; }
+  /* celular: a barra lateral vira uma barra fixa no topo, com os nomes por extenso */
+  .sidebar{
+    top:0; left:0; right:0; bottom:auto; width:100%; height:3.1rem;
+    flex-direction:row; align-items:center; border-bottom:1px solid var(--line-dark);
+  }
+  .sidebar-logo{ flex:none; padding:0 .4rem 0 .9rem; display:flex; align-items:center; }
   .sidebar-logo .logo-full{ display:none; }
-  .sidebar-logo .logo-mono{ display:block; }
+  .sidebar-logo .logo-mono{ display:block; height:20px; }
+  .sidebar-nav{
+    flex:1; min-width:0; display:flex; flex-direction:row; align-items:center;
+    overflow-x:auto; overflow-y:hidden; padding:0 .5rem; white-space:nowrap;
+    scrollbar-width:none; -webkit-overflow-scrolling:touch;
+  }
+  .sidebar-nav::-webkit-scrollbar{ display:none; }
   .nav-group-label{ display:none; }
-  .nav-link{ justify-content:center; padding:.6rem .3rem; }
-  .nav-link .nav-initial{ display:inline; }
-  .nav-label{ display:none; }
-  .sidebar-foot{ padding:.6rem; }
-  .sidebar-foot button{ font-size:0; padding:.5rem; }
-  .sidebar-foot button::first-letter{ font-size:.9rem; }
-  .topbar{ padding:.9rem .8rem; }
+  .nav-link{ flex:none; margin:0 .1rem; padding:.5rem .8rem; font-size:.86rem; }
+  .nav-link .nav-initial{ display:none; }
+  .nav-label{ display:inline; }
+  .nav-link.mobile-only{ display:flex; color:var(--g300); }
+  .sidebar-foot{ display:none; }
+  .main{ margin-left:0; padding-top:3.1rem; }
+  .topbar{ top:3.1rem; padding:.9rem .8rem; }
   .topbar h1{ font-size:1.2rem; }
 }
-
 /* ---------------- buttons ---------------- */
 .btn{
   display:inline-flex; align-items:center; gap:.4rem; font-size:.84rem; font-weight:600;
@@ -904,7 +914,12 @@ function renderSidebar(activeKey){
       </a>`;
     });
   });
+  html += `<a class="nav-link mobile-only" href="javascript:void(0)" data-mact="export">Exportar backup</a>
+    <a class="nav-link mobile-only" href="javascript:void(0)" data-mact="import">Importar backup</a>`;
   document.getElementById('sidebarNav').innerHTML = html;
+  document.querySelectorAll('[data-mact]').forEach(a=>a.onclick=()=>{
+    document.getElementById(a.dataset.mact==='export' ? 'btnExport' : 'btnImport').click();
+  });
 }
 function navCount(key){
   if(key==='eventos') return DB.events.length || null;
