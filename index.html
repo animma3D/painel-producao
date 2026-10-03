@@ -422,7 +422,7 @@ function uid(){ return Date.now().toString(36) + Math.random().toString(36).slic
 function seedData(){
   const eventId = uid();
   const vendorId = uid();
-  return {
+  const data = {
     events: [
       {
         id: eventId, nome:'IX Encontro Nacional Mini Kalzone', cliente:'Agência Diferencial',
@@ -444,6 +444,7 @@ function seedData(){
     schedule: [],
     deliverables: [],
     logistica: [],
+    agencies: [],
     incidents: [
       {
         id: uid(), eventoId: eventId, fornecedorId: vendorId,
@@ -454,6 +455,24 @@ function seedData(){
       }
     ]
   };
+  ensureAgencies(data);
+  return data;
+}
+
+// cria as agências padrão se não houver nenhuma e vincula eventos antigos da Diferencial
+function ensureAgencies(d){
+  let changed = false;
+  if(!Array.isArray(d.agencies)) d.agencies = [];
+  if(!d.agencies.length){
+    d.agencies.push({ id:uid(), nome:'Diferencial', entraFinanceiro:'Não', notas:'Trabalho como funcionária — o dinheiro não é meu.' });
+    d.agencies.push({ id:uid(), nome:'Duda Kuerten Produções', entraFinanceiro:'Sim', notas:'Jobs por fora — todo o lucro do orçamento é meu.' });
+    changed = true;
+  }
+  const dif = d.agencies.find(a=>/diferencial/i.test(a.nome||''));
+  (d.events||[]).forEach(e=>{
+    if(!e.agenciaId && dif && /diferencial/i.test(e.cliente||'')){ e.agenciaId = dif.id; changed = true; }
+  });
+  return changed;
 }
 
 function loadDB(){
@@ -461,9 +480,10 @@ function loadDB(){
     const raw = localStorage.getItem(DB_KEY);
     if(!raw) return seedData();
     const parsed = JSON.parse(raw);
-    ['events','vendors','crew','tasks','budgetItems','schedule','deliverables','logistica','incidents'].forEach(k=>{
+    ['events','vendors','crew','tasks','budgetItems','schedule','deliverables','logistica','agencies','incidents'].forEach(k=>{
       if(!Array.isArray(parsed[k])) parsed[k] = [];
     });
+    if(ensureAgencies(parsed)) localStorage.setItem(DB_KEY, JSON.stringify(parsed));
     return parsed;
   }catch(e){
     console.error('Erro ao carregar dados', e);
@@ -509,6 +529,34 @@ function toast(msg){
   toast._t = setTimeout(()=>t.classList.remove('show'), 2200);
 }
 function byId(arr,id){ return arr.find(x=>x.id===id); }
+
+/* ----- agências e financeiro ----- */
+function agencyOf(ev){ return ev && ev.agenciaId ? byId(DB.agencies, ev.agenciaId) : null; }
+function agencyName(ev){ const a = agencyOf(ev); return a ? a.nome : '—'; }
+function eventEntraFinanceiro(ev){ const a = agencyOf(ev); return !!a && a.entraFinanceiro==='Sim'; }
+
+/* ----- honorários e comissões ----- */
+function lineBase(b){ const r = Number(b.valorReal)||0; return r>0 ? r : (Number(b.valorPrevisto)||0); }
+function lineComissao(b){
+  const v = Number(b.comissaoValor)||0;
+  return b.comissaoTipo==='R$' ? v : lineBase(b) * v / 100;
+}
+function eventBudgetSummary(ev){
+  const items = DB.budgetItems.filter(b=>b.eventoId===ev.id);
+  const previsto = items.reduce((s,b)=>s+(Number(b.valorPrevisto)||0),0);
+  const real = items.reduce((s,b)=>s+(Number(b.valorReal)||0),0);
+  const base = items.reduce((s,b)=>s+lineBase(b),0);
+  // honorários: um % geral do evento, sobre o custo total das linhas
+  const pct = ev.honorarioGeralPct!=null && ev.honorarioGeralPct!=='' ? Number(ev.honorarioGeralPct)
+            : (ev.honorarioGeralTipo!=='R$' ? Number(ev.honorarioGeralValor) : 0);
+  const honorarioPct = pct || 0;
+  const honorarios = base * honorarioPct / 100;
+  // comissão: dinheiro que entra para mim, cobrado do fornecedor, linha a linha
+  const comissoes = items.reduce((s,b)=>s+lineComissao(b),0);
+  const contrato = Number(ev.valorContrato)||0;
+  return { items, previsto, real, base, honorarioPct, honorarios, comissoes,
+           lucro: honorarios + comissoes, contrato, margemContrato: contrato - real };
+}
 function nameOrDash(obj, key){ return obj && obj[key] ? obj[key] : '—'; }
 
 function eventName(id){ const e = byId(DB.events,id); return e ? e.nome : '— (geral)'; }
@@ -638,6 +686,9 @@ function eventOptions(includeNone){
   const opts = DB.events.map(e=>({value:e.id,label:e.nome}));
   return includeNone ? [{value:'',label:'— Geral (sem evento) —'}, ...opts] : opts;
 }
+function agencyOptions(){
+  return [{value:'',label:'— selecione a agência —'}, ...DB.agencies.map(a=>({value:a.id,label:a.nome}))];
+}
 function vendorOptions(includeNone){
   const opts = DB.vendors.map(v=>({value:v.id,label:v.nome}));
   return includeNone ? [{value:'',label:'— Nenhum —'}, ...opts] : opts;
@@ -649,6 +700,7 @@ function SCHEMAS(){
       title:'evento', fields:[
         {key:'nome', label:'Nome do evento', type:'text', required:true},
         {key:'cliente', label:'Cliente', type:'text'},
+        {key:'agenciaId', label:'Agência que está atendendo', type:'select', options:agencyOptions(), required:true},
         {key:'local', label:'Local', type:'text'},
         {key:'dataMontagem', label:'Montagem (início)', type:'date', half:true},
         {key:'dataMontagemFim', label:'Montagem (fim)', type:'date', half:true},
@@ -658,6 +710,14 @@ function SCHEMAS(){
         {key:'status', label:'Status', type:'select', options:EVENT_STATUS.map(s=>({value:s,label:s})), half:true},
         {key:'participantes', label:'Participantes', type:'number', half:true},
         {key:'valorContrato', label:'Valor do contrato (R$)', type:'number', step:'0.01', half:true},
+        {key:'honorarioGeralPct', label:'Honorários do evento (% sobre o custo total)', type:'number', step:'0.01'},
+        {key:'notas', label:'Notas', type:'textarea'},
+      ]
+    },
+    agency: {
+      title:'agência', gender:'f', fields:[
+        {key:'nome', label:'Nome da agência', type:'text', required:true},
+        {key:'entraFinanceiro', label:'O lucro dos eventos dessa agência entra no meu financeiro?', type:'select', options:[{value:'Sim',label:'Sim — o dinheiro é meu'},{value:'Não',label:'Não — o dinheiro não é meu'}]},
         {key:'notas', label:'Notas', type:'textarea'},
       ]
     },
@@ -699,6 +759,8 @@ function SCHEMAS(){
         {key:'fornecedorId', label:'Fornecedor', type:'select', options:vendorOptions(true), half:true},
         {key:'valorPrevisto', label:'Valor previsto (R$)', type:'number', step:'0.01', half:true},
         {key:'valorReal', label:'Valor real (R$)', type:'number', step:'0.01', half:true},
+        {key:'comissaoTipo', label:'Minha comissão — tipo', type:'select', options:[{value:'%',label:'% (sobre o valor da linha)'},{value:'R$',label:'R$ (valor fixo)'}], half:true},
+        {key:'comissaoValor', label:'Minha comissão — valor', type:'number', step:'0.01', half:true},
         {key:'statusPagamento', label:'Status de pagamento', type:'select', options:PAY_STATUS.map(s=>({value:s,label:s}))},
       ]
     },
@@ -887,6 +949,7 @@ const ROUTES = [
   { key:'dashboard', path:'#/dashboard', label:'Dashboard', icon:'◆', group:'Visão geral' },
   { key:'eventos', path:'#/eventos', label:'Eventos', icon:'▣', group:'Produção' },
   { key:'tarefas', path:'#/tarefas', label:'Tarefas', icon:'✓', group:'Produção' },
+  { key:'agencias', path:'#/agencias', label:'Agências', icon:'', group:'Rede' },
   { key:'fornecedores', path:'#/fornecedores', label:'Fornecedores', icon:'⬡', group:'Rede' },
   { key:'ocorrencias', path:'#/ocorrencias', label:'Ocorrências', icon:'!', group:'Rede' },
   { key:'equipe', path:'#/equipe', label:'Equipe', icon:'◍', group:'Rede' },
@@ -960,7 +1023,7 @@ function router(){
   const key = (hash.replace('#/','').split('/')[0]) || 'dashboard';
   renderSidebar(key);
   const fn = { dashboard:renderDashboard, eventos:renderEventos, tarefas:renderTarefas,
-    fornecedores:renderFornecedores, equipe:renderEquipe, financeiro:renderFinanceiro,
+    agencias:renderAgencias, fornecedores:renderFornecedores, equipe:renderEquipe, financeiro:renderFinanceiro,
     ocorrencias:renderOcorrencias }[key] || renderDashboard;
   fn();
 }
@@ -1043,16 +1106,18 @@ function renderDashboard(){
   const activeEvents = DB.events.filter(e=>!['Concluído','Cancelado'].includes(e.status));
   const upcoming = [...DB.events].filter(e=>e.dataInicio).sort((a,b)=>a.dataInicio.localeCompare(b.dataInicio)).slice(0,5);
   const pendingTasks = DB.tasks.filter(t=>t.status!=='Concluída').sort((a,b)=>(a.prazo||'9999').localeCompare(b.prazo||'9999')).slice(0,6);
-  const totalContrato = DB.events.reduce((s,e)=>s+(Number(e.valorContrato)||0),0);
-  const totalReal = DB.budgetItems.reduce((s,b)=>s+(Number(b.valorReal)||0),0);
+  const mineEvents = DB.events.filter(eventEntraFinanceiro);
+  const mineIds = new Set(mineEvents.map(e=>e.id));
+  const totalContrato = mineEvents.reduce((s,e)=>s+(Number(e.valorContrato)||0),0);
+  const totalReal = DB.budgetItems.filter(b=>mineIds.has(b.eventoId)).reduce((s,b)=>s+(Number(b.valorReal)||0),0);
   const recentIncidents = [...DB.incidents].reverse().slice(0,4);
 
   const html = `
     <div class="cards">
       <div class="card"><div class="kpi-label">Eventos ativos</div><div class="kpi-num">${activeEvents.length}</div><div class="kpi-sub">de ${DB.events.length} no total</div></div>
       <div class="card"><div class="kpi-label">Tarefas pendentes</div><div class="kpi-num">${DB.tasks.filter(t=>t.status!=='Concluída').length}</div><div class="kpi-sub">${DB.tasks.filter(t=>t.status==='Concluída').length} concluídas</div></div>
-      <div class="card"><div class="kpi-label">Valor contratado</div><div class="kpi-num" style="font-size:1.5rem;">${fmtMoney(totalContrato)}</div><div class="kpi-sub">soma de todos os eventos</div></div>
-      <div class="card"><div class="kpi-label">Custo real registrado</div><div class="kpi-num" style="font-size:1.5rem;">${fmtMoney(totalReal)}</div><div class="kpi-sub">itens de orçamento lançados</div></div>
+      <div class="card"><div class="kpi-label">Valor contratado</div><div class="kpi-num" style="font-size:1.5rem;">${fmtMoney(totalContrato)}</div><div class="kpi-sub">só eventos que entram no meu financeiro</div></div>
+      <div class="card"><div class="kpi-label">Custo real registrado</div><div class="kpi-num" style="font-size:1.5rem;">${fmtMoney(totalReal)}</div><div class="kpi-sub">só eventos que entram no meu financeiro</div></div>
     </div>
 
     <div class="two-col">
@@ -1201,12 +1266,13 @@ function renderEventos(){
   }).sort((a,b)=>(b.dataInicio||'').localeCompare(a.dataInicio||''));
 
   const listaHtml = list.length ? `<div class="table-wrap"><table>
-          <thead><tr><th>Evento</th><th>Cliente</th><th>Datas</th><th>Status</th><th class="num">Participantes</th><th class="num">Valor contrato</th><th></th></tr></thead>
+          <thead><tr><th>Evento</th><th>Cliente</th><th>Agência</th><th>Datas</th><th>Status</th><th class="num">Participantes</th><th class="num">Valor contrato</th><th></th></tr></thead>
           <tbody>
             ${list.map(e=>`
               <tr>
                 <td><a class="row-link" href="#/eventos/${e.id}">${escapeHtml(e.nome)}</a><div class="small muted">${escapeHtml(e.local||'')}</div></td>
                 <td>${escapeHtml(e.cliente||'—')}</td>
+                <td class="small">${agencyOf(e) ? escapeHtml(agencyName(e)) : '<span class="badge warn">definir</span>'}</td>
                 <td class="small">${eventDatesCell(e)}</td>
                 <td>${badgeForEventStatus(e.status)}</td>
                 <td class="num">${e.participantes||'—'}</td>
@@ -1522,33 +1588,41 @@ function eventTabContent(tab, ctx){
   }
 
   if(tab==='orcamento'){
+    const sm = eventBudgetSummary(ev);
+    const comLabel = (b)=> Number(b.comissaoValor) ? (b.comissaoTipo==='R$' ? 'valor fixo' : `${Number(b.comissaoValor)}%`) : '';
     return `
     <div class="panel">
       <div class="panel-head"><h3>Orçamento</h3><button class="btn small" id="btnAddBudget">+ Item</button></div>
       <div class="panel-body pad0">
         ${budgetItems.length ? `<div class="table-wrap"><table>
-          <thead><tr><th>Item</th><th>Categoria</th><th>Fornecedor</th><th class="num">Previsto</th><th class="num">Real</th><th>Pagamento</th><th></th></tr></thead>
+          <thead><tr><th>Item</th><th class="num">Previsto</th><th class="num">Real</th><th class="num">Minha comissão</th><th>Pagamento</th><th></th></tr></thead>
           <tbody>${budgetItems.map(b=>`
             <tr>
-              <td>${escapeHtml(b.item)}</td>
-              <td class="small muted">${escapeHtml(b.categoria||'—')}</td>
-              <td class="small">${b.fornecedorId?escapeHtml(vendorName(b.fornecedorId)):'—'}</td>
+              <td>${escapeHtml(b.item)}<div class="small muted">${escapeHtml(b.categoria||'—')}${b.fornecedorId?' · '+escapeHtml(vendorName(b.fornecedorId)):''}</div></td>
               <td class="num">${fmtMoney(b.valorPrevisto)}</td>
               <td class="num">${fmtMoney(b.valorReal)}</td>
+              <td class="num">${fmtMoney(lineComissao(b))}${comLabel(b)?`<div class="small muted">${comLabel(b)}</div>`:''}</td>
               <td>${badgeForPay(b.statusPagamento||'Pendente')}</td>
               <td>
                 <button class="icon-btn" data-edit-budget="${b.id}" title="Editar">✎</button>
                 <button class="icon-btn" data-del-budget="${b.id}" title="Excluir">✕</button>
               </td>
             </tr>`).join('')}</tbody>
-        </table></div>
+        </table></div>` : `<div class="empty"><div class="ic">$</div>Nenhum item de orçamento ainda.</div>`}
         <div class="totals-bar">
-          <div><div class="t">Previsto</div><div class="v">${fmtMoney(totalPrevisto)}</div></div>
-          <div><div class="t">Real</div><div class="v">${fmtMoney(totalReal)}</div></div>
-          <div><div class="t">Contrato</div><div class="v">${fmtMoney(ev.valorContrato)}</div></div>
-          <div><div class="t">Margem estimada</div><div class="v" style="color:${margem<0?'var(--danger)':'var(--ok)'}">${fmtMoney(margem)}</div></div>
+          <div><div class="t">Previsto</div><div class="v">${fmtMoney(sm.previsto)}</div></div>
+          <div><div class="t">Real</div><div class="v">${fmtMoney(sm.real)}</div></div>
+          <div><div class="t">Honorários</div><div class="v">${fmtMoney(sm.honorarios)}</div><div class="small muted">${sm.honorarioPct}% sobre ${fmtMoney(sm.base)}</div></div>
+          <div><div class="t">Comissões</div><div class="v">${fmtMoney(sm.comissoes)}</div></div>
+          <div><div class="t">Lucro (honorários + comissões)</div><div class="v" style="color:${sm.lucro<0?'var(--danger)':'var(--ok)'}">${fmtMoney(sm.lucro)}</div></div>
         </div>
-        ` : `<div class="empty"><div class="ic">$</div>Nenhum item de orçamento ainda.</div>`}
+        <div class="totals-bar" style="border-top:none; padding-top:0;">
+          <div><div class="t">Contrato</div><div class="v">${fmtMoney(sm.contrato)}</div></div>
+          <div><div class="t">Margem sobre o contrato</div><div class="v" style="color:${sm.margemContrato<0?'var(--danger)':'var(--ok)'}">${fmtMoney(sm.margemContrato)}</div></div>
+        </div>
+        ${!agencyOf(ev) ? '<p class="small muted" style="padding:0 1.3rem 1.1rem;">Defina a agência deste evento (Editar evento) para saber se esse lucro entra no seu financeiro.</p>'
+          : (eventEntraFinanceiro(ev) ? '<p class="small muted" style="padding:0 1.3rem 1.1rem;">Agência <strong>'+escapeHtml(agencyName(ev))+'</strong>: o lucro deste orçamento entra no seu financeiro.</p>'
+          : '<p class="small muted" style="padding:0 1.3rem 1.1rem;">Agência <strong>'+escapeHtml(agencyName(ev))+'</strong>: esses valores são só do orçamento do evento — <strong>não entram no seu financeiro</strong>.</p>')}
       </div>
     </div>`;
   }
@@ -1769,12 +1843,14 @@ function wireEventTab(tab, ctx){
   const { id } = ctx;
 
   if(tab==='orcamento'){
+    const comNote = 'Minha comissão é o que eu recebo do fornecedor por tê-lo contratado (ex: ele cobra 10.000, repasso 12.000 ao cliente e cobro a diferença dele). Entra somando no lucro.';
     document.getElementById('btnAddBudget').onclick = ()=> openForm('budgetItem', {
+      extraNote: comNote,
       onSave:(rec)=>{ rec.eventoId=id; DB.budgetItems.push(rec); save(); toast('Item adicionado.'); renderEventDetail(id, tab); }
     });
     document.querySelectorAll('[data-edit-budget]').forEach(b=>b.onclick=()=>{
       const rec = byId(DB.budgetItems, b.dataset.editBudget);
-      openForm('budgetItem', { data:rec, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Item atualizado.'); renderEventDetail(id, tab); } });
+      openForm('budgetItem', { data:rec, extraNote: comNote, onSave:(updated)=>{ Object.assign(rec, updated); save(); toast('Item atualizado.'); renderEventDetail(id, tab); } });
     });
     document.querySelectorAll('[data-del-budget]').forEach(b=>b.onclick=()=>{
       confirmDelete('Excluir este item de orçamento?', ()=>{ DB.budgetItems = DB.budgetItems.filter(x=>x.id!==b.dataset.delBudget); save(); toast('Item excluído.'); renderEventDetail(id, tab); });
@@ -2025,10 +2101,14 @@ function renderEventDetail(id, tabKey){
           <span>📅 Evento ${fmtDateRange(ev.dataInicio, ev.dataFim)}</span>
           ${ev.dataDesmontagem?`<span>📦 Desmontagem ${fmtDate(ev.dataDesmontagem)}</span>`:''}
           ${ev.cliente?`<span>👤 ${escapeHtml(ev.cliente)}</span>`:''}
+          <span>Agência <strong>${agencyOf(ev)?escapeHtml(agencyName(ev)):'não definida'}</strong></span>
           ${ev.participantes?`<span><strong>${ev.participantes}</strong> participantes</span>`:''}
         </div>
       </div>
-      <div><span class="badge ${{'Prospecção':'gray','Orçamento':'info','Confirmado':'ok','Em produção':'warn','Concluído':'ok','Cancelado':'danger'}[ev.status]||'gray'}" style="font-size:.82rem;">${escapeHtml(ev.status||'—')}</span></div>
+      <div style="display:flex; flex-direction:column; align-items:flex-end; gap:.5rem;">
+        <span class="badge ${{'Prospecção':'gray','Orçamento':'info','Confirmado':'ok','Em produção':'warn','Concluído':'ok','Cancelado':'danger'}[ev.status]||'gray'}" style="font-size:.82rem;">${escapeHtml(ev.status||'—')}</span>
+        ${!agencyOf(ev) ? '<span class="badge warn">Sem agência definida</span>' : (eventEntraFinanceiro(ev) ? '<span class="badge ok">Entra no meu financeiro</span>' : '<span class="badge gray">Não entra no meu financeiro</span>')}
+      </div>
     </div>
 
     ${ev.notas? `<div class="panel"><div class="panel-body small">${escapeHtml(ev.notas)}</div></div>` : ''}
@@ -2113,6 +2193,55 @@ function renderTarefas(){
   });
   document.querySelectorAll('[data-del-task-g]').forEach(b=>b.onclick=()=>{
     confirmDelete('Excluir esta tarefa?', ()=>{ DB.tasks = DB.tasks.filter(x=>x.id!==b.dataset.delTaskG); save(); toast('Tarefa excluída.'); renderTarefas(); });
+  });
+}
+
+/* =========================================================
+   AGÊNCIAS
+   ========================================================= */
+function openAgencyForm(existing){
+  openForm('agency', {
+    data: existing,
+    onSave:(rec)=>{
+      if(existing) Object.assign(existing, rec); else DB.agencies.push(rec);
+      save(); toast('Agência salva.'); renderAgencias();
+    }
+  });
+}
+function renderAgencias(){
+  setTop('Agências','Quem está atendendo cada evento — e se o lucro entra no seu financeiro',
+    `<button class="btn" id="btnNewAgency">+ Nova agência</button>`);
+  const html = `
+    <div class="panel">
+      <div class="panel-body pad0">
+        ${DB.agencies.length ? `<div class="table-wrap"><table>
+          <thead><tr><th>Agência</th><th>Financeiro</th><th class="num">Eventos</th><th>Notas</th><th></th></tr></thead>
+          <tbody>${DB.agencies.map(a=>{
+            const n = DB.events.filter(e=>e.agenciaId===a.id).length;
+            return `<tr>
+              <td><strong>${escapeHtml(a.nome)}</strong></td>
+              <td>${a.entraFinanceiro==='Sim' ? '<span class="badge ok">Entra no meu financeiro</span>' : '<span class="badge gray">Não entra — dinheiro não é meu</span>'}</td>
+              <td class="num">${n}</td>
+              <td class="small muted">${escapeHtml(a.notas||'—')}</td>
+              <td>
+                <button class="icon-btn" data-edit-agency="${a.id}" title="Editar">✎</button>
+                <button class="icon-btn" data-del-agency="${a.id}" title="Excluir">✕</button>
+              </td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>` : `<div class="empty"><div class="ic">▣</div>Nenhuma agência cadastrada ainda.</div>`}
+      </div>
+    </div>
+    <p class="small muted">Em cada evento você escolhe a agência que está atendendo. Só os eventos de agências marcadas como "entra no meu financeiro" entram nos totais do Financeiro e do Dashboard.</p>`;
+  document.getElementById('view').innerHTML = html;
+  document.getElementById('btnNewAgency').onclick = ()=>openAgencyForm();
+  document.querySelectorAll('[data-edit-agency]').forEach(b=>b.onclick=()=>openAgencyForm(byId(DB.agencies, b.dataset.editAgency)));
+  document.querySelectorAll('[data-del-agency]').forEach(b=>b.onclick=()=>{
+    const a = byId(DB.agencies, b.dataset.delAgency);
+    const n = DB.events.filter(e=>e.agenciaId===a.id).length;
+    confirmDelete(`Excluir a agência <strong>${escapeHtml(a.nome)}</strong>?${n?` Os ${n} evento(s) dela ficam <strong>sem agência definida</strong> e deixam de entrar no financeiro até você escolher outra.`:''}`, ()=>{
+      DB.agencies = DB.agencies.filter(x=>x.id!==a.id); save(); toast('Agência excluída.'); renderAgencias();
+    });
   });
 }
 
@@ -2226,47 +2355,57 @@ function renderEquipe(){
    FINANCEIRO
    ========================================================= */
 function renderFinanceiro(){
-  setTop('Financeiro','Panorama financeiro por evento','');
+  setTop('Financeiro','Só os eventos de agências cujo lucro entra no seu financeiro','');
 
-  const rows = DB.events.map(e=>{
-    const items = DB.budgetItems.filter(b=>b.eventoId===e.id);
-    const previsto = items.reduce((s,b)=>s+(Number(b.valorPrevisto)||0),0);
-    const real = items.reduce((s,b)=>s+(Number(b.valorReal)||0),0);
-    const contrato = Number(e.valorContrato)||0;
-    const margem = contrato - real;
-    const pendentes = items.filter(b=>(b.statusPagamento||'Pendente')!=='Pago').length;
-    return { e, previsto, real, contrato, margem, pendentes };
+  const mine = DB.events.filter(eventEntraFinanceiro);
+  const rows = mine.map(e=>{
+    const sm = eventBudgetSummary(e);
+    const pendentes = sm.items.filter(b=>(b.statusPagamento||'Pendente')!=='Pago').length;
+    return { e, sm, pendentes };
   });
-  const totC = rows.reduce((s,r)=>s+r.contrato,0);
-  const totP = rows.reduce((s,r)=>s+r.previsto,0);
-  const totR = rows.reduce((s,r)=>s+r.real,0);
-  const totM = totC - totR;
+  const tot = (k)=>rows.reduce((s,r)=>s+r.sm[k],0);
+
+  // eventos que ficam de fora, para dar transparência
+  const excluded = DB.events.filter(e=>!eventEntraFinanceiro(e));
+  const semAgencia = excluded.filter(e=>!agencyOf(e));
+  const outras = excluded.filter(e=>agencyOf(e));
+  const byAgency = {};
+  outras.forEach(e=>{ const n = agencyName(e); byAgency[n] = (byAgency[n]||0)+1; });
 
   const html = `
     <div class="cards">
-      <div class="card"><div class="kpi-label">Total contratado</div><div class="kpi-num" style="font-size:1.6rem;">${fmtMoney(totC)}</div></div>
-      <div class="card"><div class="kpi-label">Total previsto (orçamento)</div><div class="kpi-num" style="font-size:1.6rem;">${fmtMoney(totP)}</div></div>
-      <div class="card"><div class="kpi-label">Total real gasto</div><div class="kpi-num" style="font-size:1.6rem;">${fmtMoney(totR)}</div></div>
-      <div class="card"><div class="kpi-label">Margem estimada</div><div class="kpi-num" style="font-size:1.6rem; color:${totM<0?'var(--danger)':'var(--ok)'}">${fmtMoney(totM)}</div></div>
+      <div class="card"><div class="kpi-label">Total contratado</div><div class="kpi-num" style="font-size:1.6rem;">${fmtMoney(tot('contrato'))}</div></div>
+      <div class="card"><div class="kpi-label">Custo real</div><div class="kpi-num" style="font-size:1.6rem;">${fmtMoney(tot('real'))}</div></div>
+      <div class="card"><div class="kpi-label">Honorários</div><div class="kpi-num" style="font-size:1.6rem;">${fmtMoney(tot('honorarios'))}</div></div>
+      <div class="card"><div class="kpi-label">Lucro</div><div class="kpi-num" style="font-size:1.6rem; color:${tot('lucro')<0?'var(--danger)':'var(--ok)'}">${fmtMoney(tot('lucro'))}</div><div class="kpi-sub">honorários + comissões (${fmtMoney(tot('comissoes'))})</div></div>
     </div>
     <div class="panel">
       <div class="panel-head"><h3>Por evento</h3></div>
       <div class="panel-body pad0">
         ${rows.length ? `<div class="table-wrap"><table>
-          <thead><tr><th>Evento</th><th>Status</th><th class="num">Contrato</th><th class="num">Previsto</th><th class="num">Real</th><th class="num">Margem</th><th>Pagamentos</th></tr></thead>
+          <thead><tr><th>Evento</th><th>Agência</th><th>Status</th><th class="num">Contrato</th><th class="num">Custo real</th><th class="num">Honorários</th><th class="num">Comissões</th><th class="num">Lucro</th><th>Pagamentos</th></tr></thead>
           <tbody>${rows.map(r=>`
             <tr>
               <td><a class="row-link" href="#/eventos/${r.e.id}/orcamento">${escapeHtml(r.e.nome)}</a></td>
+              <td class="small">${escapeHtml(agencyName(r.e))}</td>
               <td>${badgeForEventStatus(r.e.status)}</td>
-              <td class="num">${fmtMoney(r.contrato)}</td>
-              <td class="num">${fmtMoney(r.previsto)}</td>
-              <td class="num">${fmtMoney(r.real)}</td>
-              <td class="num" style="color:${r.margem<0?'var(--danger)':'inherit'}">${fmtMoney(r.margem)}</td>
+              <td class="num">${fmtMoney(r.sm.contrato)}</td>
+              <td class="num">${fmtMoney(r.sm.real)}</td>
+              <td class="num">${fmtMoney(r.sm.honorarios)}</td>
+              <td class="num">${fmtMoney(r.sm.comissoes)}</td>
+              <td class="num" style="color:${r.sm.lucro<0?'var(--danger)':'inherit'}"><strong>${fmtMoney(r.sm.lucro)}</strong></td>
               <td>${r.pendentes? `<span class="badge warn">${r.pendentes} pendente(s)</span>` : `<span class="badge ok">em dia</span>`}</td>
             </tr>`).join('')}</tbody>
-        </table></div>` : `<div class="empty"><div class="ic">$</div>Nenhum evento cadastrado ainda.</div>`}
+        </table></div>` : `<div class="empty"><div class="ic">$</div>Nenhum evento seu entrando aqui ainda. Cadastre uma agência que entra no seu financeiro (ex: Duda Kuerten Produções) e escolha ela no evento.</div>`}
       </div>
     </div>
+    ${excluded.length ? `<div class="panel">
+      <div class="panel-head"><h3>Fora do seu financeiro</h3></div>
+      <div class="panel-body small">
+        ${Object.keys(byAgency).map(n=>`<p style="margin-bottom:.4rem;"><strong>${escapeHtml(n)}</strong> — ${byAgency[n]} evento(s). O dinheiro não é seu, por isso não entra nos totais.</p>`).join('')}
+        ${semAgencia.length ? `<p style="margin-top:.6rem;"><span class="badge warn">Atenção</span> ${semAgencia.length} evento(s) sem agência definida, por isso não estão contados: ${semAgencia.map(e=>`<a class="row-link" href="#/eventos/${e.id}">${escapeHtml(e.nome)}</a>`).join(', ')}.</p>` : ''}
+      </div>
+    </div>` : ''}
   `;
   document.getElementById('view').innerHTML = html;
 }
