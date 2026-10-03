@@ -649,13 +649,14 @@ function SCHEMAS(){
         {key:'nome', label:'Nome do evento', type:'text', required:true},
         {key:'cliente', label:'Cliente', type:'text'},
         {key:'local', label:'Local', type:'text'},
-        {key:'dataMontagem', label:'Data da montagem', type:'date', half:true},
-        {key:'dataInicio', label:'Data do evento (início)', type:'date', required:true, half:true},
-        {key:'dataFim', label:'Data do evento (fim)', type:'date', half:true},
+        {key:'dataMontagem', label:'Montagem (início)', type:'date', half:true},
+        {key:'dataMontagemFim', label:'Montagem (fim)', type:'date', half:true},
+        {key:'dataInicio', label:'Evento (início)', type:'date', required:true, half:true},
+        {key:'dataFim', label:'Evento (fim)', type:'date', half:true},
         {key:'dataDesmontagem', label:'Data da desmontagem', type:'date', half:true},
         {key:'status', label:'Status', type:'select', options:EVENT_STATUS.map(s=>({value:s,label:s})), half:true},
         {key:'participantes', label:'Participantes', type:'number', half:true},
-        {key:'valorContrato', label:'Valor do contrato (R$)', type:'number', step:'0.01'},
+        {key:'valorContrato', label:'Valor do contrato (R$)', type:'number', step:'0.01', half:true},
         {key:'notas', label:'Notas', type:'textarea'},
       ]
     },
@@ -1125,7 +1126,7 @@ let eventosMonthCursor = null;
 
 function eventDatesCell(e){
   const parts = [`<div>${fmtDateRange(e.dataInicio,e.dataFim)}</div>`];
-  if(e.dataMontagem) parts.push(`<div class="small muted">Montagem: ${fmtDate(e.dataMontagem)}</div>`);
+  if(e.dataMontagem || e.dataMontagemFim) parts.push(`<div class="small muted">Montagem: ${fmtDateRange(e.dataMontagem,e.dataMontagemFim)}</div>`);
   if(e.dataDesmontagem) parts.push(`<div class="small muted">Desmontagem: ${fmtDate(e.dataDesmontagem)}</div>`);
   return parts.join('');
 }
@@ -1143,14 +1144,16 @@ function renderEventosAgenda(list){
 
   const byDate = {};
   const put = (iso, ev, kind)=>{ if(!iso) return; (byDate[iso] = byDate[iso]||[]).push({ ev, kind }); };
+  const putRange = (a, b, ev, kind)=>{
+    const first = a || b; if(!first) return;
+    const start = parseISO(first);
+    const end = (a && b && b>=a) ? parseISO(b) : start;
+    const days = Math.min(diffDays(start,end), 60);
+    for(let i=0;i<=days;i++) put(isoOf(addDays(start,i)), ev, kind);
+  };
   list.forEach(ev=>{
-    put(ev.dataMontagem, ev, 'montagem');
-    if(ev.dataInicio){
-      const start = parseISO(ev.dataInicio);
-      const end = ev.dataFim && ev.dataFim>=ev.dataInicio ? parseISO(ev.dataFim) : start;
-      const days = Math.min(diffDays(start,end), 60);
-      for(let i=0;i<=days;i++) put(isoOf(addDays(start,i)), ev, 'evento');
-    }
+    putRange(ev.dataMontagem, ev.dataMontagemFim, ev, 'montagem');
+    putRange(ev.dataInicio, ev.dataFim, ev, 'evento');
     put(ev.dataDesmontagem, ev, 'desmontagem');
   });
   const kindCls = { montagem:'info', evento:'dark', desmontagem:'gray' };
@@ -2018,7 +2021,7 @@ function renderEventDetail(id, tabKey){
         <h2>${escapeHtml(ev.nome)}</h2>
         <div class="event-meta">
           <span>📍 ${escapeHtml(ev.local||'local a definir')}</span>
-          ${ev.dataMontagem?`<span>🛠 Montagem ${fmtDate(ev.dataMontagem)}</span>`:''}
+          ${(ev.dataMontagem||ev.dataMontagemFim)?`<span>🛠 Montagem ${fmtDateRange(ev.dataMontagem, ev.dataMontagemFim)}</span>`:''}
           <span>📅 Evento ${fmtDateRange(ev.dataInicio, ev.dataFim)}</span>
           ${ev.dataDesmontagem?`<span>📦 Desmontagem ${fmtDate(ev.dataDesmontagem)}</span>`:''}
           ${ev.cliente?`<span>👤 ${escapeHtml(ev.cliente)}</span>`:''}
