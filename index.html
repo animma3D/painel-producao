@@ -809,9 +809,10 @@ function openForm(schemaKey, opts){
     </div>
   `;
   const close = ()=>{ root.innerHTML=''; };
-  document.getElementById('modalCloseBtn').onclick = close;
-  document.getElementById('modalCancelBtn').onclick = close;
-  document.getElementById('modalOverlay').addEventListener('click', e=>{ if(e.target.id==='modalOverlay') close(); });
+  const askClose = ()=> confirmClose(close);
+  document.getElementById('modalCloseBtn').onclick = askClose;
+  document.getElementById('modalCancelBtn').onclick = askClose;
+  // clicar fora da janela não fecha mais (evita perder o que foi preenchido)
   document.getElementById('modalForm').addEventListener('submit', e=>{
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -830,6 +831,26 @@ function openForm(schemaKey, opts){
   });
 }
 
+function confirmClose(onYes){
+  if(document.getElementById('closeAskOverlay')) return;
+  const el = document.createElement('div');
+  el.className = 'modal-overlay';
+  el.id = 'closeAskOverlay';
+  el.style.zIndex = '150';
+  el.innerHTML = `
+    <div class="modal" style="max-width:380px; margin-top:12vh;">
+      <div class="modal-head"><h3>Fechar esta janela?</h3></div>
+      <div class="modal-body confirm-box"><p>O que você preencheu e não salvou será perdido.</p></div>
+      <div class="modal-foot">
+        <button class="btn ghost" id="closeAskNo">Continuar editando</button>
+        <button class="btn danger" id="closeAskYes">Fechar mesmo</button>
+      </div>
+    </div>`;
+  document.body.appendChild(el);
+  const remove = ()=> el.remove();
+  document.getElementById('closeAskNo').onclick = remove;
+  document.getElementById('closeAskYes').onclick = ()=>{ remove(); onYes(); };
+}
 function confirmAction(message, onConfirm, opts){
   opts = opts || {};
   const title = opts.title || 'Confirmar exclusão';
@@ -851,7 +872,6 @@ function confirmAction(message, onConfirm, opts){
   const close = ()=>{ root.innerHTML=''; };
   document.getElementById('confirmCloseBtn').onclick = close;
   document.getElementById('confirmCancelBtn').onclick = close;
-  document.getElementById('confirmOverlay').addEventListener('click', e=>{ if(e.target.id==='confirmOverlay') close(); });
   document.getElementById('confirmOkBtn').onclick = ()=>{ onConfirm(); close(); };
 }
 function confirmDelete(message, onConfirm){
