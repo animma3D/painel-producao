@@ -324,7 +324,20 @@ a.cal-chip{ text-decoration:none; }
 .gantt-scroll{ flex:1; overflow-x:auto; }
 .gantt-timeline{ position:relative; }
 .gantt-ticks{ height:38px; position:relative; border-bottom:1px solid var(--line); background:var(--g50); }
-.gantt-tick{ position:absolute; top:0; height:100%; display:flex; align-items:center; font-size:.66rem; color:var(--g500); padding-left:.4rem; border-left:1px solid var(--line); white-space:nowrap; }
+.gantt-tick{ position:absolute; top:0; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--g700); border-left:1px solid var(--line); white-space:nowrap; line-height:1.1; }
+.gantt-tick .gt-d{ font-size:.72rem; font-weight:600; }
+.gantt-tick .gt-m{ font-size:.55rem; text-transform:uppercase; letter-spacing:.06em; color:var(--g500); }
+.gantt-tick.we .gt-d{ color:var(--g300); font-weight:500; }
+.gantt-band{ position:absolute; top:0; bottom:0; pointer-events:none; }
+.countdown{ display:flex; align-items:center; gap:1.6rem; padding:1.2rem 1.6rem; flex-wrap:wrap; }
+.cd-main{ display:flex; align-items:baseline; gap:.9rem; flex-wrap:wrap; }
+.cd-head{ font-size:.78rem; text-transform:uppercase; letter-spacing:.14em; color:var(--g500); font-weight:600; }
+.cd-num{ font-family:var(--display); font-size:3rem; font-weight:800; line-height:1; letter-spacing:-.02em; }
+.cd-num.live{ color:var(--danger); }
+.cd-tail{ font-size:1rem; color:var(--g700); }
+.cd-side{ margin-left:auto; display:flex; flex-direction:column; gap:.3rem; font-size:.84rem; }
+.gantt-legend{ display:flex; gap:1.1rem; flex-wrap:wrap; margin-bottom:.7rem; }
+.gantt-legend i{ display:inline-block; width:.8rem; height:.6rem; border-radius:2px; margin-right:.4rem; vertical-align:middle; }
 .gantt-rows{ position:relative; }
 .gantt-row{ height:46px; border-bottom:1px solid var(--line); position:relative; }
 .gantt-bar{
@@ -633,6 +646,25 @@ function varianceBadge(diff){
 function badgeForLogistica(s){
   const map = { 'Pendente':'danger','Confirmado':'info','Em trânsito':'warn','Entregue':'ok' };
   return `<span class="badge ${map[s]||'gray'}">${escapeHtml(s||'Pendente')}</span>`;
+}
+function relDaysLabel(iso){
+  const d = daysUntil(iso);
+  if(d==null) return '';
+  if(d===0) return 'hoje';
+  if(d===1) return 'amanhã';
+  return d>0 ? `em ${d} dias` : `há ${-d} dias`;
+}
+function eventCountdown(ev){
+  if(!ev.dataInicio) return null;
+  const fim = (ev.dataFim && ev.dataFim>=ev.dataInicio) ? ev.dataFim : ev.dataInicio;
+  const toStart = daysUntil(ev.dataInicio), toEnd = daysUntil(fim);
+  if(toStart>0) return { head: toStart===1?'Falta':'Faltam', big:String(toStart), tail: toStart===1?'dia para o evento':'dias para o evento', live:false };
+  if(toEnd>=0){
+    const total = diffDays(parseISO(ev.dataInicio), parseISO(fim))+1;
+    return { head:'Evento', big:'Hoje', tail: total>1 ? `em andamento — dia ${-toStart+1} de ${total}` : 'é hoje!', live:true };
+  }
+  const n = -toEnd;
+  return { head:'Evento realizado', big:String(n), tail: n===1?'dia atrás':'dias atrás', live:false };
 }
 function parseISO(iso){ return iso ? new Date(iso+'T00:00:00') : null; }
 function diffDays(a,b){ return Math.round((b-a)/86400000); }
@@ -1134,7 +1166,7 @@ function renderDashboard(){
             ${upcoming.map(e=>`
               <tr>
                 <td><a class="row-link" href="#/eventos/${e.id}">${escapeHtml(e.nome)}</a><div class="small muted">${escapeHtml(e.local||'')}</div></td>
-                <td class="small muted">${fmtDateRange(e.dataInicio,e.dataFim)}</td>
+                <td class="small muted">${fmtDateRange(e.dataInicio,e.dataFim)}<div><strong>${relDaysLabel(e.dataInicio)}</strong></div></td>
                 <td>${badgeForEventStatus(e.status)}</td>
               </tr>`).join('')}
           </tbody></table></div>` : `<div class="empty"><div class="ic">▣</div>Nenhum evento cadastrado ainda.<div><button class="btn small" id="emptyAddEvent">+ Novo evento</button></div></div>`}
@@ -1410,47 +1442,70 @@ function renderDeliverablesAgenda(items){
   `;
 }
 
-function renderDeliverablesGantt(items){
+function renderDeliverablesGantt(items, ev){
   const withDates = items.filter(it=>it.prazo);
   if(!withDates.length){
     return `<div class="empty"><div class="ic">▦</div>Defina um prazo nas entregas para ver o Gantt.</div>`;
   }
-  const dates = withDates.map(it=>parseISO(it.prazo));
-  let minDate = addDays(new Date(Math.min(...dates)), -2);
-  let maxDate = addDays(new Date(Math.max(...dates)), 2);
-  const totalDays = diffDays(minDate, maxDate)+1;
-  const pxPerDay = totalDays>60 ? 18 : (totalDays>30 ? 24 : 34);
-  const totalWidth = totalDays*pxPerDay;
   const todayD = new Date(); todayD.setHours(0,0,0,0);
-  const todayOffset = diffDays(minDate, todayD);
-  const showWeekly = totalDays>40;
 
+  // intervalo: de hoje/da primeira data até o fim do evento (e desmontagem), todos os dias corridos
+  const starts = [todayD, ...withDates.map(it=>parseISO(it.prazo))];
+  const ends = withDates.map(it=>parseISO(it.prazo));
+  if(ev){
+    [ev.dataMontagem, ev.dataMontagemFim, ev.dataInicio].forEach(x=>{ if(x) starts.push(parseISO(x)); });
+    [ev.dataInicio, ev.dataFim, ev.dataMontagemFim, ev.dataDesmontagem].forEach(x=>{ if(x) ends.push(parseISO(x)); });
+  }
+  const minDate = addDays(new Date(Math.min(...starts)), -1);
+  const maxDate = addDays(new Date(Math.max(...ends)), 1);
+  const totalDays = diffDays(minDate, maxDate)+1;
+  const px = 30;
+  const totalWidth = totalDays*px;
+  const idxOf = (d)=> diffDays(minDate, d);
+  const todayOffset = idxOf(todayD);
+
+  const MES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
   let ticks = '';
-  if(showWeekly){
-    for(let d=0; d<totalDays; d+=7){
-      const date = addDays(minDate,d);
-      ticks += `<div class="gantt-tick" style="left:${d*pxPerDay}px;">${date.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})}</div>`;
-    }
-  } else {
-    for(let d=0; d<totalDays; d++){
-      const date = addDays(minDate,d);
-      if(d===0 || date.getDay()===1){
-        ticks += `<div class="gantt-tick" style="left:${d*pxPerDay}px;">${date.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})}</div>`;
-      }
-    }
+  let weekends = '';
+  for(let i=0; i<totalDays; i++){
+    const date = addDays(minDate,i);
+    const dow = date.getDay();
+    const we = (dow===0 || dow===6);
+    const showMonth = (i===0 || date.getDate()===1);
+    ticks += `<div class="gantt-tick ${we?'we':''}" style="left:${i*px}px; width:${px}px;">${showMonth?`<span class="gt-m">${MES[date.getMonth()]}</span>`:''}<span class="gt-d">${date.getDate()}</span></div>`;
+    if(we) weekends += `<div class="gantt-band" style="left:${i*px}px; width:${px}px; background:rgba(0,0,0,.03);"></div>`;
+  }
+
+  // faixas de montagem / evento / desmontagem
+  const band = (a, b, color, label)=>{
+    if(!a && !b) return '';
+    const first = parseISO(a||b);
+    const last = (a && b && b>=a) ? parseISO(b) : first;
+    const i0 = Math.max(0, idxOf(first)), i1 = Math.min(totalDays-1, idxOf(last));
+    if(i1<i0) return '';
+    return `<div class="gantt-band" title="${label}" style="left:${i0*px}px; width:${(i1-i0+1)*px}px; background:${color};"></div>`;
+  };
+  let bands = '';
+  const legend = [];
+  if(ev){
+    if(ev.dataMontagem||ev.dataMontagemFim){ bands += band(ev.dataMontagem, ev.dataMontagemFim, 'rgba(58,90,134,.14)', 'Montagem'); legend.push(['rgba(58,90,134,.35)','Montagem']); }
+    if(ev.dataInicio){ bands += band(ev.dataInicio, ev.dataFim, 'rgba(10,10,10,.14)', 'Evento'); legend.push(['rgba(10,10,10,.4)','Evento']); }
+    if(ev.dataDesmontagem){ bands += band(ev.dataDesmontagem, ev.dataDesmontagem, 'rgba(110,110,110,.18)', 'Desmontagem'); legend.push(['rgba(110,110,110,.45)','Desmontagem']); }
   }
 
   const rows = withDates.map(it=>{
-    const d = parseISO(it.prazo);
-    const left = diffDays(minDate,d)*pxPerDay;
+    const left = idxOf(parseISO(it.prazo))*px + px/2;
     const overdue = isOverdue(it);
     const cls = it.status==='Concluído'?'ok':(it.status==='Em andamento'?'warn':'gray');
     return { it, left, overdue, cls };
   });
 
   const todayMarker = (todayOffset>=0 && todayOffset<totalDays);
+  const todayLeft = todayOffset*px + px/2;
+  const gridBg = `background-image:linear-gradient(to right, var(--line) 1px, transparent 1px); background-size:${px}px 100%;`;
 
   return `
+    ${legend.length?`<div class="small muted gantt-legend">${legend.map(l=>`<span><i style="background:${l[0]}"></i>${l[1]}</span>`).join('')}<span><i style="background:var(--danger)"></i>Hoje</span></div>`:''}
     <div class="gantt">
       <div class="gantt-labels">
         <div class="gantt-label-head"></div>
@@ -1460,15 +1515,16 @@ function renderDeliverablesGantt(items){
         <div class="gantt-timeline" style="width:${totalWidth}px">
           <div class="gantt-ticks">
             ${ticks}
-            ${todayMarker?`<div class="gantt-today-line" style="left:${todayOffset*pxPerDay}px;"><span class="gantt-today-label">Hoje</span></div>`:''}
+            ${todayMarker?`<div class="gantt-today-line" style="left:${todayLeft}px;"><span class="gantt-today-label">Hoje</span></div>`:''}
           </div>
-          <div class="gantt-rows">
+          <div class="gantt-rows" style="${gridBg}">
+            ${weekends}${bands}
             ${rows.map(r=>`
               <div class="gantt-row">
                 <div class="gantt-milestone ${r.cls} ${r.overdue?'overdue':''}" style="left:${r.left}px;" data-edit-deliv="${r.it.id}" title="${escapeHtml(r.it.titulo)}"></div>
               </div>
             `).join('')}
-            ${todayMarker?`<div class="gantt-today-line" style="left:${todayOffset*pxPerDay}px;"></div>`:''}
+            ${todayMarker?`<div class="gantt-today-line" style="left:${todayLeft}px;"></div>`:''}
           </div>
         </div>
       </div>
@@ -1476,10 +1532,10 @@ function renderDeliverablesGantt(items){
   `;
 }
 
-function renderDeliverablesPanel(items){
+function renderDeliverablesPanel(items, ev){
   const views = [ ['lista','Lista'], ['agenda','Agenda'], ['gantt','Gantt'] ];
   const body = deliverablesView==='agenda' ? renderDeliverablesAgenda(items)
-             : deliverablesView==='gantt' ? renderDeliverablesGantt(items)
+             : deliverablesView==='gantt' ? renderDeliverablesGantt(items, ev)
              : renderDeliverablesLista(items);
   return `
     <div class="panel">
@@ -1516,7 +1572,23 @@ function eventTabContent(tab, ctx){
     budgetItems.forEach(b=>{ if((b.statusPagamento||'Pendente')==='Pendente') alerts.push({ sev:'warn', label:'Pendente', text:`Pagamento — ${escapeHtml(b.item)}`, tab:'orcamento' }); });
     incidents.forEach(i=>{ if(['Alta','Crítica'].includes(i.gravidade)) alerts.push({ sev:'danger', label:i.gravidade, text:`Ocorrência — ${escapeHtml(i.titulo)}`, tab:'ocorrencias' }); });
 
+    const cd = eventCountdown(ev);
+    const sideChip = (label, iso)=> iso ? `<div class="cd-chip"><span class="muted">${label}</span> <strong>${relDaysLabel(iso)}</strong> <span class="muted">· ${fmtDate(iso)}</span></div>` : '';
+    const cdHtml = cd ? `
+    <div class="panel countdown">
+      <div class="cd-main">
+        <div class="cd-head">${cd.head}</div>
+        <div class="cd-num ${cd.live?'live':''}">${cd.big}</div>
+        <div class="cd-tail">${cd.tail}</div>
+      </div>
+      <div class="cd-side">
+        ${(ev.dataMontagem && daysUntil(ev.dataMontagem)>=0) ? sideChip('Montagem', ev.dataMontagem) : ''}
+        ${sideChip('Evento', ev.dataInicio)}
+        ${(ev.dataDesmontagem && daysUntil(ev.dataDesmontagem)>=0) ? sideChip('Desmontagem', ev.dataDesmontagem) : ''}
+      </div>
+    </div>` : '';
     return `
+    ${cdHtml}
     <div class="cards">
       <div class="card">
         <div class="kpi-label">Progresso das entregas</div>
@@ -1592,7 +1664,7 @@ function eventTabContent(tab, ctx){
   }
 
   if(tab==='entregas'){
-    return renderDeliverablesPanel(deliverables);
+    return renderDeliverablesPanel(deliverables, ev);
   }
 
   if(tab==='orcamento'){
