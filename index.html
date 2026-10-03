@@ -57,7 +57,7 @@ input,select,textarea{ font-family:var(--body); }
   display:flex; align-items:center; gap:.65rem; padding:.62rem .6rem; border-radius:var(--radius);
   font-size:.88rem; font-weight:500; color:#d8d8d8; margin-bottom:.1rem;
 }
-.nav-link .ic{ width:1.1rem; text-align:center; opacity:.8; font-size:.95rem; }
+.nav-link .nav-initial{ display:none; font-weight:700; font-size:.95rem; }
 .nav-link:hover{ background:var(--g900); color:var(--white); }
 .nav-link.active{ background:var(--white); color:var(--black); }
 .nav-link .count{
@@ -97,8 +97,8 @@ input,select,textarea{ font-family:var(--body); }
   .sidebar-logo .logo-mono{ display:block; }
   .nav-group-label{ display:none; }
   .nav-link{ justify-content:center; padding:.6rem .3rem; }
-  .nav-link .ic{ font-size:1.05rem; }
-  .nav-label, .nav-link .count{ display:none; }
+  .nav-link .nav-initial{ display:inline; }
+  .nav-label{ display:none; }
   .sidebar-foot{ padding:.6rem; }
   .sidebar-foot button{ font-size:0; padding:.5rem; }
   .sidebar-foot button::first-letter{ font-size:.9rem; }
@@ -899,10 +899,8 @@ function renderSidebar(activeKey){
   groups.forEach(g=>{
     html += `<div class="nav-group-label">${g}</div>`;
     ROUTES.filter(r=>r.group===g).forEach(r=>{
-      const count = navCount(r.key);
       html += `<a class="nav-link ${r.key===activeKey?'active':''}" href="${r.path}" title="${r.label}">
-        <span class="ic">${r.icon}</span><span class="nav-label">${r.label}</span>
-        ${count!=null?`<span class="count">${count}</span>`:''}
+        <span class="nav-initial">${r.label.charAt(0)}</span><span class="nav-label">${r.label}</span>
       </a>`;
     });
   });
