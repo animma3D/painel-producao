@@ -231,6 +231,8 @@ td.num, th.num{ text-align:right; font-variant-numeric:tabular-nums; }
   display:flex; justify-content:space-between; gap:1.4rem; flex-wrap:wrap;
 }
 .event-header .eyebrow{ font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color:var(--g300); margin-bottom:.5rem; }
+.event-badges{ display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin-bottom:.8rem; }
+.event-badges .badge{ font-size:.74rem; padding:.28rem .75rem; }
 .event-header h2{ font-size:1.7rem; margin-bottom:.5rem; }
 .event-meta{ display:flex; flex-wrap:wrap; gap:1.4rem; font-size:.84rem; color:var(--g300); }
 .event-meta strong{ color:var(--white); font-weight:600; }
@@ -2088,7 +2090,10 @@ function renderEventDetail(id, tabKey){
   const html = `
     <div class="event-header">
       <div>
-        <div class="eyebrow">${escapeHtml(ev.status||'')}</div>
+        <div class="event-badges">
+          <span class="badge ${{'Prospecção':'gray','Orçamento':'info','Confirmado':'ok','Em produção':'warn','Concluído':'ok','Cancelado':'danger'}[ev.status]||'gray'}">${escapeHtml(ev.status||'—')}</span>
+          ${!agencyOf(ev) ? '<span class="badge warn">Sem agência definida</span>' : (eventEntraFinanceiro(ev) ? '<span class="badge ok">Entra no meu financeiro</span>' : '<span class="badge gray">Não entra no meu financeiro</span>')}
+        </div>
         <h2>${escapeHtml(ev.nome)}</h2>
         <div class="event-meta">
           <span>📍 ${escapeHtml(ev.local||'local a definir')}</span>
@@ -2099,10 +2104,6 @@ function renderEventDetail(id, tabKey){
           <span>Agência <strong>${agencyOf(ev)?escapeHtml(agencyName(ev)):'não definida'}</strong></span>
           ${ev.participantes?`<span><strong>${ev.participantes}</strong> participantes</span>`:''}
         </div>
-      </div>
-      <div style="display:flex; flex-direction:column; align-items:flex-end; gap:.5rem;">
-        <span class="badge ${{'Prospecção':'gray','Orçamento':'info','Confirmado':'ok','Em produção':'warn','Concluído':'ok','Cancelado':'danger'}[ev.status]||'gray'}" style="font-size:.82rem;">${escapeHtml(ev.status||'—')}</span>
-        ${!agencyOf(ev) ? '<span class="badge warn">Sem agência definida</span>' : (eventEntraFinanceiro(ev) ? '<span class="badge ok">Entra no meu financeiro</span>' : '<span class="badge gray">Não entra no meu financeiro</span>')}
       </div>
     </div>
 
