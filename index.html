@@ -231,8 +231,14 @@ td.num, th.num{ text-align:right; font-variant-numeric:tabular-nums; }
   display:flex; justify-content:space-between; gap:1.4rem; flex-wrap:wrap;
 }
 .event-header .eyebrow{ font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color:var(--g300); margin-bottom:.5rem; }
-.event-badges{ display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin-bottom:.8rem; }
-.event-badges .badge{ font-size:.74rem; padding:.28rem .75rem; }
+.event-badges{ display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin-top:1.1rem; }
+.event-badges .badge{ font-size:.74rem; padding:.28rem .75rem; line-height:1.2; }
+select.status-select{
+  appearance:none; -webkit-appearance:none; border:none; cursor:pointer; font-family:var(--body); font-weight:600;
+  padding-right:1.7rem; background-repeat:no-repeat; background-position:right .6rem center; background-size:.55rem;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%23444' stroke-width='1.6'/></svg>");
+}
+select.status-select:hover{ filter:brightness(.96); }
 .event-header h2{ font-size:1.7rem; margin-bottom:.5rem; }
 .event-meta{ display:flex; flex-wrap:wrap; gap:1.4rem; font-size:.84rem; color:var(--g300); }
 .event-meta strong{ color:var(--white); font-weight:600; }
@@ -564,7 +570,8 @@ function eventName(id){ const e = byId(DB.events,id); return e ? e.nome : '— (
 function vendorName(id){ const v = byId(DB.vendors,id); return v ? v.nome : '—'; }
 
 /* status option sets */
-const EVENT_STATUS = ['Prospecção','Orçamento','Confirmado','Em produção','Concluído','Cancelado'];
+const EVENT_STATUS = ['Prospecção','Orçamento','Confirmado','Em produção','Em fechamento','Concluído','Cancelado'];
+const EVENT_STATUS_CLS = { 'Prospecção':'gray','Orçamento':'info','Confirmado':'ok','Em produção':'warn','Em fechamento':'info','Concluído':'ok','Cancelado':'danger' };
 const VENDOR_CATS = ['Som e Iluminação','Catering/Buffet','Decoração','Estrutura/Tenda','Segurança','Transporte','Fotografia/Vídeo','Comunicação Visual','Equipamentos','Cerimonial','Outros'];
 const CREW_ROLES = ['Coordenador(a) de produção','Produtor(a) de palco','Recepção/Credenciamento','Segurança','Técnico(a) de som','Técnico(a) de luz','Fotógrafo(a)/Vídeo','Freelancer geral','Outros'];
 const TASK_PHASES = ['Pré-produção','Durante o evento','Pós-evento'];
@@ -577,8 +584,7 @@ const LOGISTICA_TRANSPORTE = ['Frete próprio','Transportadora terceirizada','Fo
 const LOGISTICA_STATUS = ['Pendente','Confirmado','Em trânsito','Entregue'];
 
 function badgeForEventStatus(s){
-  const map = { 'Prospecção':'gray','Orçamento':'info','Confirmado':'ok','Em produção':'warn','Concluído':'ok','Cancelado':'danger' };
-  return `<span class="badge ${map[s]||'gray'}">${escapeHtml(s||'—')}</span>`;
+  return `<span class="badge ${EVENT_STATUS_CLS[s]||'gray'}">${escapeHtml(s||'—')}</span>`;
 }
 function badgeForTaskStatus(s){
   const map = { 'A fazer':'gray','Em andamento':'warn','Concluída':'ok' };
@@ -2090,10 +2096,6 @@ function renderEventDetail(id, tabKey){
   const html = `
     <div class="event-header">
       <div>
-        <div class="event-badges">
-          <span class="badge ${{'Prospecção':'gray','Orçamento':'info','Confirmado':'ok','Em produção':'warn','Concluído':'ok','Cancelado':'danger'}[ev.status]||'gray'}">${escapeHtml(ev.status||'—')}</span>
-          ${!agencyOf(ev) ? '<span class="badge warn">Sem agência definida</span>' : (eventEntraFinanceiro(ev) ? '<span class="badge ok">Entra no meu financeiro</span>' : '<span class="badge gray">Não entra no meu financeiro</span>')}
-        </div>
         <h2>${escapeHtml(ev.nome)}</h2>
         <div class="event-meta">
           <span>📍 ${escapeHtml(ev.local||'local a definir')}</span>
@@ -2103,6 +2105,12 @@ function renderEventDetail(id, tabKey){
           ${ev.cliente?`<span>👤 ${escapeHtml(ev.cliente)}</span>`:''}
           <span>Agência <strong>${agencyOf(ev)?escapeHtml(agencyName(ev)):'não definida'}</strong></span>
           ${ev.participantes?`<span><strong>${ev.participantes}</strong> participantes</span>`:''}
+        </div>
+        <div class="event-badges">
+          <select class="badge ${EVENT_STATUS_CLS[ev.status]||'gray'} status-select" id="evStatusSelect" title="Clique para mudar o andamento do evento">
+            ${EVENT_STATUS.map(st=>`<option value="${st}" ${st===ev.status?'selected':''}>${st}</option>`).join('')}
+          </select>
+          ${!agencyOf(ev) ? '<span class="badge warn">Sem agência definida</span>' : (eventEntraFinanceiro(ev) ? '<span class="badge ok">Entra no meu financeiro</span>' : '<span class="badge gray">Não entra no meu financeiro</span>')}
         </div>
       </div>
     </div>
@@ -2118,6 +2126,9 @@ function renderEventDetail(id, tabKey){
   document.getElementById('view').innerHTML = html;
 
   document.getElementById('btnEditEvent').onclick = ()=>openEventForm(ev);
+  document.getElementById('evStatusSelect').onchange = (e)=>{
+    ev.status = e.target.value; save(); toast('Andamento atualizado.'); renderEventDetail(id, tab);
+  };
   document.getElementById('btnDeleteEvent').onclick = ()=>{
     confirmDelete(`Excluir o evento <strong>${escapeHtml(ev.nome)}</strong>? Entregas, orçamento, T&amp;M (com o rundown), logística, tarefas e ocorrências vinculados a ele permanecerão, mas sem evento associado.`, ()=>{
       DB.events = DB.events.filter(e=>e.id!==id);
