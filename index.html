@@ -50,21 +50,22 @@ input,select,textarea{ font-family:var(--body); }
 .sidebar-logo .logo-mono{ display:none; height:22px; }
 .sidebar-nav{ flex:1; padding:.5rem .8rem; overflow-y:auto; }
 .nav-group-label{
-  font-size:.68rem; letter-spacing:.14em; text-transform:uppercase; color:var(--g300);
-  padding:1rem .6rem .4rem;
+  font-size:.72rem; font-weight:700; letter-spacing:.2em; text-transform:uppercase; color:var(--white);
+  padding:1.15rem .6rem .6rem; margin-top:1.1rem; border-top:1px solid var(--line-dark);
 }
+.sidebar-nav > .nav-group-label:first-child{ border-top:none; margin-top:.2rem; padding-top:.3rem; }
+.nav-group{ margin-left:.55rem; padding-left:.6rem; border-left:1px solid var(--g700); }
 .nav-link{
-  display:flex; align-items:center; gap:.65rem; padding:.62rem .6rem; border-radius:var(--radius);
-  font-size:.88rem; font-weight:500; color:#d8d8d8; margin-bottom:.1rem;
+  display:flex; align-items:center; justify-content:space-between; gap:.65rem; padding:.62rem .8rem;
+  border-radius:var(--radius); font-size:.88rem; font-weight:500; color:#d8d8d8;
+  background:var(--g900); margin-bottom:.3rem;
 }
+.nav-link::after{ content:"›"; color:var(--g500); font-size:1.15rem; line-height:1; }
 .nav-link .nav-initial{ display:none; font-weight:700; font-size:.95rem; }
-.nav-link:hover{ background:var(--g900); color:var(--white); }
-.nav-link.active{ background:var(--white); color:var(--black); }
-.nav-link .count{
-  margin-left:auto; font-size:.72rem; background:var(--g800); color:var(--g300);
-  padding:.05rem .4rem; border-radius:10px;
-}
-.nav-link.active .count{ background:var(--g100); color:var(--black); }
+.nav-link:hover{ background:var(--g700); color:var(--white); }
+.nav-link:hover::after{ color:var(--white); }
+.nav-link.active{ background:var(--white); color:var(--black); font-weight:600; }
+.nav-link.active::after{ color:var(--black); }
 
 .sidebar-foot{ padding:.9rem 1rem 1.2rem; border-top:1px solid var(--line-dark); }
 .sidebar-foot button{
@@ -107,7 +108,11 @@ input,select,textarea{ font-family:var(--body); }
   }
   .sidebar-nav::-webkit-scrollbar{ display:none; }
   .nav-group-label{ display:none; }
-  .nav-link{ flex:none; margin:0 .1rem; padding:.5rem .8rem; font-size:.86rem; }
+  .nav-group{ display:contents; }
+  .nav-link{ flex:none; margin:0 .1rem; padding:.5rem .8rem; font-size:.86rem; background:transparent; }
+  .nav-link::after{ display:none; }
+  .nav-link:hover{ background:var(--g900); }
+  .nav-link.active{ background:var(--white); }
   .nav-link .nav-initial{ display:none; }
   .nav-label{ display:inline; }
   .nav-link.mobile-only{ display:flex; color:var(--g300); }
@@ -907,12 +912,13 @@ function renderSidebar(activeKey){
   ROUTES.forEach(r=>{ if(!groups.includes(r.group)) groups.push(r.group); });
   let html = '';
   groups.forEach(g=>{
-    html += `<div class="nav-group-label">${g}</div>`;
+    html += `<div class="nav-group-label">${g}</div><div class="nav-group">`;
     ROUTES.filter(r=>r.group===g).forEach(r=>{
       html += `<a class="nav-link ${r.key===activeKey?'active':''}" href="${r.path}" title="${r.label}">
         <span class="nav-initial">${r.label.charAt(0)}</span><span class="nav-label">${r.label}</span>
       </a>`;
     });
+    html += `</div>`;
   });
   html += `<a class="nav-link mobile-only" href="javascript:void(0)" data-mact="export">Exportar backup</a>
     <a class="nav-link mobile-only" href="javascript:void(0)" data-mact="import">Importar backup</a>`;
