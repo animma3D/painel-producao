@@ -292,6 +292,9 @@ tr.rundown-live td:first-child{ box-shadow: inset 3px 0 0 var(--danger); }
 .cal-chip.warn{ background:var(--warn-bg); color:var(--warn); }
 .cal-chip.ok{ background:var(--ok-bg); color:var(--ok); }
 .cal-chip.danger{ background:var(--danger-bg); color:var(--danger); font-weight:700; }
+.cal-chip.info{ background:var(--info-bg); color:var(--info); }
+.cal-chip.dark{ background:var(--black); color:var(--white); }
+a.cal-chip{ text-decoration:none; }
 @media (max-width:760px){
   .cal-cell{ min-height:54px; }
   .cal-dow{ font-size:.6rem; padding:.35rem .1rem; }
@@ -646,8 +649,10 @@ function SCHEMAS(){
         {key:'nome', label:'Nome do evento', type:'text', required:true},
         {key:'cliente', label:'Cliente', type:'text'},
         {key:'local', label:'Local', type:'text'},
-        {key:'dataInicio', label:'Data de início', type:'date', required:true, half:true},
-        {key:'dataFim', label:'Data de término', type:'date', half:true},
+        {key:'dataMontagem', label:'Data da montagem', type:'date', half:true},
+        {key:'dataInicio', label:'Data do evento (início)', type:'date', required:true, half:true},
+        {key:'dataFim', label:'Data do evento (fim)', type:'date', half:true},
+        {key:'dataDesmontagem', label:'Data da desmontagem', type:'date', half:true},
         {key:'status', label:'Status', type:'select', options:EVENT_STATUS.map(s=>({value:s,label:s})), half:true},
         {key:'participantes', label:'Participantes', type:'number', half:true},
         {key:'valorContrato', label:'Valor do contrato (R$)', type:'number', step:'0.01'},
@@ -1095,6 +1100,73 @@ function openEventForm(existing){
   });
 }
 
+let eventosView = 'lista';
+let eventosMonthCursor = null;
+
+function eventDatesCell(e){
+  const parts = [`<div>${fmtDateRange(e.dataInicio,e.dataFim)}</div>`];
+  if(e.dataMontagem) parts.push(`<div class="small muted">Montagem: ${fmtDate(e.dataMontagem)}</div>`);
+  if(e.dataDesmontagem) parts.push(`<div class="small muted">Desmontagem: ${fmtDate(e.dataDesmontagem)}</div>`);
+  return parts.join('');
+}
+
+function renderEventosAgenda(list){
+  if(!eventosMonthCursor){
+    eventosMonthCursor = new Date(); eventosMonthCursor.setDate(1); eventosMonthCursor.setHours(0,0,0,0);
+  }
+  const year = eventosMonthCursor.getFullYear();
+  const month = eventosMonthCursor.getMonth();
+  const cells = buildMonthGrid(year, month);
+  const todayIso = isoOf(new Date());
+  const monthLabel = eventosMonthCursor.toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+  const dows = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+
+  const byDate = {};
+  const put = (iso, ev, kind)=>{ if(!iso) return; (byDate[iso] = byDate[iso]||[]).push({ ev, kind }); };
+  list.forEach(ev=>{
+    put(ev.dataMontagem, ev, 'montagem');
+    if(ev.dataInicio){
+      const start = parseISO(ev.dataInicio);
+      const end = ev.dataFim && ev.dataFim>=ev.dataInicio ? parseISO(ev.dataFim) : start;
+      const days = Math.min(diffDays(start,end), 60);
+      for(let i=0;i<=days;i++) put(isoOf(addDays(start,i)), ev, 'evento');
+    }
+    put(ev.dataDesmontagem, ev, 'desmontagem');
+  });
+  const kindCls = { montagem:'info', evento:'dark', desmontagem:'gray' };
+  const kindLabel = { montagem:'Montagem · ', evento:'', desmontagem:'Desmontagem · ' };
+
+  return `
+    <div class="cal-head" style="padding:1.1rem 1.3rem 1rem;">
+      <div>
+        <div class="cal-title">${monthLabel}</div>
+        <div class="small muted" style="margin-top:.35rem; display:flex; gap:.9rem; flex-wrap:wrap;">
+          <span><span class="cal-chip info" style="display:inline-block; width:.9rem; padding:0; height:.6rem;"></span> Montagem</span>
+          <span><span class="cal-chip dark" style="display:inline-block; width:.9rem; padding:0; height:.6rem;"></span> Evento</span>
+          <span><span class="cal-chip gray" style="display:inline-block; width:.9rem; padding:0; height:.6rem;"></span> Desmontagem</span>
+        </div>
+      </div>
+      <div class="cal-nav">
+        <button class="icon-btn" id="evCalPrev" title="Mês anterior">‹</button>
+        <button class="btn ghost small" id="evCalToday">Hoje</button>
+        <button class="icon-btn" id="evCalNext" title="Próximo mês">›</button>
+      </div>
+    </div>
+    <div style="padding:0 1.3rem 1.3rem;">
+      <div class="cal-grid">
+        ${dows.map(d=>`<div class="cal-dow">${d}</div>`).join('')}
+        ${cells.map(c=>{
+          const iso = isoOf(c.date);
+          const entries = byDate[iso] || [];
+          return `<div class="cal-cell ${c.out?'out':''} ${iso===todayIso?'today':''}">
+            <div class="cal-daynum">${c.date.getDate()}</div>
+            ${entries.map(en=>`<a class="cal-chip ${kindCls[en.kind]}" href="#/eventos/${en.ev.id}" title="${escapeHtml(kindLabel[en.kind]+en.ev.nome)}">${kindLabel[en.kind]}${escapeHtml(en.ev.nome)}</a>`).join('')}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
 function renderEventos(){
   setTop('Eventos','Todos os eventos em produção, confirmados ou concluídos',
     `<button class="btn" id="btnNewEvent">+ Novo evento</button>`);
@@ -1104,6 +1176,22 @@ function renderEventos(){
     const okS = !eventosFilter.status || e.status===eventosFilter.status;
     return okQ && okS;
   }).sort((a,b)=>(b.dataInicio||'').localeCompare(a.dataInicio||''));
+
+  const listaHtml = list.length ? `<div class="table-wrap"><table>
+          <thead><tr><th>Evento</th><th>Cliente</th><th>Datas</th><th>Status</th><th class="num">Participantes</th><th class="num">Valor contrato</th><th></th></tr></thead>
+          <tbody>
+            ${list.map(e=>`
+              <tr>
+                <td><a class="row-link" href="#/eventos/${e.id}">${escapeHtml(e.nome)}</a><div class="small muted">${escapeHtml(e.local||'')}</div></td>
+                <td>${escapeHtml(e.cliente||'—')}</td>
+                <td class="small">${eventDatesCell(e)}</td>
+                <td>${badgeForEventStatus(e.status)}</td>
+                <td class="num">${e.participantes||'—'}</td>
+                <td class="num">${fmtMoney(e.valorContrato)}</td>
+                <td><a class="icon-btn" href="#/eventos/${e.id}" title="Abrir">→</a></td>
+              </tr>`).join('')}
+          </tbody>
+        </table></div>` : `<div class="empty"><div class="ic">▣</div>Nenhum evento encontrado.<div><button class="btn small" id="emptyAddEvent2">+ Novo evento</button></div></div>`;
 
   const html = `
     <div class="panel">
@@ -1115,23 +1203,13 @@ function renderEventos(){
             ${EVENT_STATUS.map(s=>`<option value="${s}" ${eventosFilter.status===s?'selected':''}>${s}</option>`).join('')}
           </select>
         </div>
+        <div class="subtabs" style="margin:0; border-bottom:none;">
+          <a href="javascript:void(0)" class="subtab ${eventosView==='lista'?'active':''}" data-ev-view="lista">Lista</a>
+          <a href="javascript:void(0)" class="subtab ${eventosView==='agenda'?'active':''}" data-ev-view="agenda">Agenda</a>
+        </div>
       </div>
       <div class="panel-body pad0">
-        ${list.length ? `<div class="table-wrap"><table>
-          <thead><tr><th>Evento</th><th>Cliente</th><th>Datas</th><th>Status</th><th class="num">Participantes</th><th class="num">Valor contrato</th><th></th></tr></thead>
-          <tbody>
-            ${list.map(e=>`
-              <tr>
-                <td><a class="row-link" href="#/eventos/${e.id}">${escapeHtml(e.nome)}</a><div class="small muted">${escapeHtml(e.local||'')}</div></td>
-                <td>${escapeHtml(e.cliente||'—')}</td>
-                <td class="small">${fmtDateRange(e.dataInicio,e.dataFim)}</td>
-                <td>${badgeForEventStatus(e.status)}</td>
-                <td class="num">${e.participantes||'—'}</td>
-                <td class="num">${fmtMoney(e.valorContrato)}</td>
-                <td><a class="icon-btn" href="#/eventos/${e.id}" title="Abrir">→</a></td>
-              </tr>`).join('')}
-          </tbody>
-        </table></div>` : `<div class="empty"><div class="ic">▣</div>Nenhum evento encontrado.<div><button class="btn small" id="emptyAddEvent2">+ Novo evento</button></div></div>`}
+        ${eventosView==='agenda' ? renderEventosAgenda(list) : listaHtml}
       </div>
     </div>
   `;
@@ -1141,6 +1219,13 @@ function renderEventos(){
   if(empty2) empty2.onclick = ()=>openEventForm();
   document.getElementById('eqSearch').oninput = (e)=>{ eventosFilter.q=e.target.value; renderEventos(); document.getElementById('eqSearch').focus(); document.getElementById('eqSearch').selectionStart = document.getElementById('eqSearch').value.length; };
   document.getElementById('eqStatus').onchange = (e)=>{ eventosFilter.status=e.target.value; renderEventos(); };
+  document.querySelectorAll('[data-ev-view]').forEach(b=>b.onclick=()=>{ eventosView = b.dataset.evView; renderEventos(); });
+  const prev = document.getElementById('evCalPrev');
+  if(prev) prev.onclick = ()=>{ eventosMonthCursor = new Date(eventosMonthCursor.getFullYear(), eventosMonthCursor.getMonth()-1, 1); renderEventos(); };
+  const next = document.getElementById('evCalNext');
+  if(next) next.onclick = ()=>{ eventosMonthCursor = new Date(eventosMonthCursor.getFullYear(), eventosMonthCursor.getMonth()+1, 1); renderEventos(); };
+  const today = document.getElementById('evCalToday');
+  if(today) today.onclick = ()=>{ eventosMonthCursor = new Date(); eventosMonthCursor.setDate(1); eventosMonthCursor.setHours(0,0,0,0); renderEventos(); };
 }
 
 /* =========================================================
@@ -1913,7 +1998,9 @@ function renderEventDetail(id, tabKey){
         <h2>${escapeHtml(ev.nome)}</h2>
         <div class="event-meta">
           <span>📍 ${escapeHtml(ev.local||'local a definir')}</span>
-          <span>📅 ${fmtDateRange(ev.dataInicio, ev.dataFim)}</span>
+          ${ev.dataMontagem?`<span>🛠 Montagem ${fmtDate(ev.dataMontagem)}</span>`:''}
+          <span>📅 Evento ${fmtDateRange(ev.dataInicio, ev.dataFim)}</span>
+          ${ev.dataDesmontagem?`<span>📦 Desmontagem ${fmtDate(ev.dataDesmontagem)}</span>`:''}
           ${ev.cliente?`<span>👤 ${escapeHtml(ev.cliente)}</span>`:''}
           ${ev.participantes?`<span><strong>${ev.participantes}</strong> participantes</span>`:''}
         </div>
